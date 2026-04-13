@@ -1,0 +1,153 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Light mode overrides ─────────────────────────────────────────────────── */
+html:not(.dark) body {
+  background-color: #f3f4f6;
+  color: #111827;
+}
+
+/* Backgrounds */
+html:not(.dark) .bg-gray-950 { background-color: #f3f4f6 !important; }
+html:not(.dark) .bg-gray-900 { background-color: #ffffff !important; }
+html:not(.dark) .bg-gray-800 { background-color: #f1f5f9 !important; }
+html:not(.dark) .bg-gray-700 { background-color: #e2e8f0 !important; }
+
+/* Borders */
+html:not(.dark) .border-gray-800 { border-color: #e2e8f0 !important; }
+html:not(.dark) .border-gray-700 { border-color: #cbd5e1 !important; }
+
+/* Text */
+html:not(.dark) .text-white    { color: #0f172a !important; }
+html:not(.dark) .text-gray-100 { color: #1e293b !important; }
+html:not(.dark) .text-gray-200 { color: #334155 !important; }
+html:not(.dark) .text-gray-300 { color: #475569 !important; }
+html:not(.dark) .text-gray-400 { color: #64748b !important; }
+html:not(.dark) .text-gray-500 { color: #94a3b8 !important; }
+html:not(.dark) .text-gray-600 { color: #94a3b8 !important; }
+html:not(.dark) .text-gray-700 { color: #cbd5e1 !important; }
+
+/* Hover states */
+html:not(.dark) .hover\:bg-gray-800:hover { background-color: #f1f5f9 !important; }
+html:not(.dark) .hover\:bg-gray-700:hover { background-color: #e2e8f0 !important; }
+html:not(.dark) .hover\:text-white:hover  { color: #0f172a !important; }
+
+/* Keep orange accent fully visible in light mode */
+html:not(.dark) .bg-orange-500              { background-color: #ea580c !important; }
+html:not(.dark) .hover\:bg-orange-400:hover { background-color: #f97316 !important; }
+html:not(.dark) .text-orange-500            { color: #ea580c !important; }
+html:not(.dark) .text-orange-400            { color: #ea580c !important; }
+html:not(.dark) .border-orange-500          { border-color: #ea580c !important; }
+
+/* Buttons — ensure orange buttons keep white text */
+html:not(.dark) .bg-orange-500 { color: #ffffff !important; }
+
+/* Disabled buttons */
+html:not(.dark) .disabled\:bg-gray-800:disabled { background-color: #e2e8f0 !important; }
+html:not(.dark) .disabled\:text-gray-600:disabled { color: #94a3b8 !important; }
+
+/* Input fields */
+html:not(.dark) .bg-gray-900 input,
+html:not(.dark) input.bg-gray-900 {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Badge backgrounds — keep them visible */
+html:not(.dark) .bg-blue-900\/30   { background-color: #dbeafe !important; }
+html:not(.dark) .bg-purple-900\/30 { background-color: #ede9fe !important; }
+html:not(.dark) .bg-orange-900\/30 { background-color: #ffedd5 !important; }
+html:not(.dark) .bg-green-900\/30  { background-color: #dcfce7 !important; }
+html:not(.dark) .bg-yellow-900\/30 { background-color: #fef9c3 !important; }
+html:not(.dark) .bg-red-900\/30    { background-color: #fee2e2 !important; }
+
+/* Badge borders */
+html:not(.dark) .border-blue-800   { border-color: #93c5fd !important; }
+html:not(.dark) .border-purple-800 { border-color: #c4b5fd !important; }
+html:not(.dark) .border-orange-800 { border-color: #fdba74 !important; }
+html:not(.dark) .border-green-800  { border-color: #86efac !important; }
+html:not(.dark) .border-yellow-800 { border-color: #fde047 !important; }
+html:not(.dark) .border-red-800    { border-color: #fca5a5 !important; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+
+/* ── Chat page specific ───────────────────────────────────────────────────── */
+
+/* Bot message bubble */
+html:not(.dark) .bg-gray-800.text-gray-100 {
+  background-color: #e2e8f0 !important;
+  color: #1e293b !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+/* User message bubble — keep orange */
+html:not(.dark) .bg-orange-500.text-white {
+  background-color: #ea580c !important;
+  color: #ffffff !important;
+}
+
+/* Option buttons */
+html:not(.dark) .bg-gray-800.hover\:bg-gray-700 {
+  background-color: #f1f5f9 !important;
+  color: #1e293b !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Loading dots */
+html:not(.dark) .bg-gray-500 {
+  background-color: #94a3b8 !important;
+}
+
+/* Collected bar */
+html:not(.dark) .bg-gray-900.border-t {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Input area */
+html:not(.dark) .border-gray-800.p-4 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Chat input field */
+html:not(.dark) input.bg-gray-900 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) input.bg-gray-900:focus {
+  border-color: #ea580c !important;
+}
+
+/* Send button disabled */
+html:not(.dark) .disabled\:bg-gray-800:disabled {
+  background-color: #e2e8f0 !important;
+  color: #94a3b8 !important;
+}
+
+/* Error message */
+html:not(.dark) .bg-red-950 {
+  background-color: #fee2e2 !important;
+}
+
+
+/* User chat bubbles in report history — keep text visible in light mode */
+html:not(.dark) .bg-orange-500\/20 {
+  background-color: #ffedd5 !important;
+}
+
+html:not(.dark) .text-orange-200 {
+  color: #9a3412 !important;
+}
+
+html:not(.dark) .border-orange-800 {
+  border-color: #fdba74 !important;
+}
