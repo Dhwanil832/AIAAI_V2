@@ -66,6 +66,7 @@ def get_session(session_id: str) -> dict:
             "pending_description": None,
             "inferred_incident_type": None,
             "generated_summary": None,      # Stores LLM-generated summary for context_document
+            "vision_context": [],           # Pending vision observations to confirm with reporter
             "report": {
                 "basic_info": {},
                 "injury_data": {},
@@ -138,6 +139,44 @@ def get_report_with_incident_type(session: dict) -> dict:
     return report
 
 
+def pop_next_vision_observation(session: dict) -> Optional[dict]:
+    """
+    Returns and removes the highest priority pending vision observation
+    from session["vision_context"], or None if the list is empty.
+    """
+    vision_context = session.get("vision_context", [])
+    if not vision_context:
+        return None
+    observation = vision_context.pop(0)
+    session["vision_context"] = vision_context
+    return observation
+
+
+def build_vision_aware_question(field_label: str, vision_observation: Optional[dict]) -> str:
+    """
+    Build the next field question, naturally incorporating a vision observation
+    if one is pending. The reporter should not feel a seam between the two.
+
+    If no vision observation is pending, returns the standard field question.
+    If one is pending, the vision message is returned as the question — the
+    extractor will pick up the field confirmation from the reporter's reply.
+    """
+    if not vision_observation:
+        return f"Could you please provide the {field_label}?"
+
+    # Use the vision agent's pre-phrased natural message
+    reporter_message = vision_observation.get("reporter_message", "")
+    if reporter_message:
+        return reporter_message
+
+    # Fallback — plain observation text
+    obs_text = vision_observation.get("observation", {}).get("observation", "")
+    if obs_text:
+        return f"I noticed {obs_text.lower()} — can you tell me more about that?"
+
+    return f"Could you please provide the {field_label}?"
+
+
 async def process_message(
     session_id: str,
     user_message: str = None,
@@ -192,23 +231,24 @@ async def process_message(
             section, field = find_next_missing_field(session)
             if section is None:
                 session["step"] = "confirm"
-                session["last_question"] = None
-                response = "Here's what I've collected so far. Does everything look correct?"
-                save_message(session, response, is_user=False)
                 return {
-                    "response": response,
+                    "response": "Here's what I've collected so far. Does everything look correct?",
                     "extracted": get_report_with_incident_type(session),
                     "show_widget": "confirm-buttons"
                 }
 
             field_label = field.replace("_", " ").title()
-            response = f"Could you please provide the {field_label}?"
+
+            # Check for pending vision observation
+            vision_obs = pop_next_vision_observation(session)
+            response = build_vision_aware_question(field_label, vision_obs)
+
             session["last_question"] = response
             save_message(session, response, is_user=False)
             return {
                 "response": response,
                 "extracted": get_report_with_incident_type(session),
-                "show_widget": WIDGET_MAP.get(field)
+                "show_widget": WIDGET_MAP.get(field) if not vision_obs else None
             }
 
         # User said inference was wrong — show incident type buttons again
@@ -471,12 +511,16 @@ async def process_message(
         }
 
     field_label = field.replace("_", " ").title()
-    response = f"Could you please provide the {field_label}?"
+
+    # Check for pending vision observation — fold into question naturally
+    vision_obs = pop_next_vision_observation(session)
+    response = build_vision_aware_question(field_label, vision_obs)
+
     session["last_question"] = response
     save_message(session, response, is_user=False)
 
     return {
         "response": response,
         "extracted": get_report_with_incident_type(session),
-        "show_widget": WIDGET_MAP.get(field)
+        "show_widget": WIDGET_MAP.get(field) if not vision_obs else None
     }

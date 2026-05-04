@@ -5,12 +5,23 @@ export const startChat = async () => {
   return res.data
 }
 
-export const sendMessage = async (sessionId, message, buttonChoice = null, currentData = null) => {
+export const sendMessage = async (
+  sessionId,
+  message,
+  buttonChoice = null,
+  currentData = null,
+  imageB64 = null,
+  imageType = null,
+  imageFilename = null
+) => {
   const res = await client.post('/chat/message', {
-    session_id: sessionId,
+    session_id:     sessionId,
     message,
-    button_choice: buttonChoice,
-    current_data: currentData,
+    button_choice:  buttonChoice,
+    current_data:   currentData,
+    image_b64:      imageB64 || undefined,
+    image_type:     imageType || undefined,
+    image_filename: imageFilename || undefined,
   })
   return res.data
 }
@@ -32,12 +43,23 @@ export const startSmartChat = async () => {
   return res.data
 }
 
-export const sendSmartMessage = async (sessionId, message, buttonChoice = null, currentData = null) => {
+export const sendSmartMessage = async (
+  sessionId,
+  message,
+  buttonChoice = null,
+  currentData = null,
+  imageB64 = null,
+  imageType = null,
+  imageFilename = null
+) => {
   const res = await client.post('/chat/smart-message', {
-    session_id: sessionId,
+    session_id:     sessionId,
     message,
-    button_choice: buttonChoice,
-    current_data: currentData,
+    button_choice:  buttonChoice,
+    current_data:   currentData,
+    image_b64:      imageB64 || undefined,
+    image_type:     imageType || undefined,
+    image_filename: imageFilename || undefined,
   })
   return res.data
 }

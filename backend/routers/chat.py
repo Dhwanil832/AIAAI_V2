@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
@@ -13,7 +13,10 @@ from agents.intake import (
     get_session,
     get_report_with_incident_type,
     find_next_missing_field,
-    WIDGET_MAP
+    save_message,
+    WIDGET_MAP,
+    INCIDENT_TYPE_OPTIONS,
+    FIELD_TO_SECTION
 )
 from agents.smart_intake import (
     process_message as smart_process_message,
@@ -27,6 +30,8 @@ from agents.formatter import format_report
 from agents.similarity import find_similar
 from agents.corrective_actions import get_corrective_action_suggestions
 from agents.notifier import notify_admins_on_submit
+from agents.vision_agent import analyze_image
+from agents.vision_reasoning import run_vision_reasoning_gate
 from core.qdrant import upsert_incident
 import json
 import copy
@@ -41,6 +46,9 @@ class ChatRequest(BaseModel):
     message: Optional[str] = None
     button_choice: Optional[str] = None
     current_data: Optional[dict] = None
+    image_b64: Optional[str] = None       # base64 image, no data URI prefix
+    image_type: Optional[str] = None      # e.g. "image/jpeg"
+    image_filename: Optional[str] = None  # original filename for MinIO storage
 
 
 class ChatResponse(BaseModel):
@@ -55,8 +63,187 @@ class ChatResponse(BaseModel):
     suggested_actions: Optional[list] = None
 
 
-# ── SHARED SUBMIT HANDLER ─────────────────────────────────────────────────────
-async def _handle_submit(session_id: str, session: dict, current_user: User, db: Session, get_report_fn, narrative: str = None) -> ChatResponse:
+# ── Vision background task wrapper ────────────────────────────────────────────
+
+async def _vision_gate_wrapper(report_id: int, report_json: dict, incident_type: str):
+    """
+    Creates its own DB session so the background task is fully decoupled
+    from the request lifecycle. Safe to run after response is sent.
+    """
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        await run_vision_reasoning_gate(report_id, report_json, incident_type, db)
+    except Exception as e:
+        print(f"[chat] vision gate wrapper error for report #{report_id}: {e}")
+    finally:
+        db.close()
+
+
+# ── Field suggestion prefill helper ──────────────────────────────────────────
+
+def _apply_field_suggestions(session: dict, suggestions: dict):
+    """
+    Soft-prefill session report fields from vision field_suggestions.
+    Uses FIELD_TO_SECTION to place each field in the correct section.
+    Never overwrites a field that already has a non-empty value.
+    incident_type is stored on the session directly, not in the report sections.
+    """
+    if not suggestions:
+        return
+
+    report = session.setdefault("report", {
+        "basic_info": {},
+        "injury_data": {},
+        "near_miss_data": {},
+        "equipment_damage_data": {}
+    })
+
+    applied = []
+    for field, value in suggestions.items():
+        if not value or str(value).strip().lower() in ("", "n/a", "na", "none"):
+            continue
+
+        if field == "incident_type":
+            if not session.get("incident_type"):
+                session["incident_type"] = value
+                applied.append(f"incident_type={value}")
+            continue
+
+        section = FIELD_TO_SECTION.get(field)
+        if not section:
+            continue
+
+        section_data = report.setdefault(section, {})
+        existing = section_data.get(field, "")
+        if not existing or str(existing).strip().lower() in ("", "n/a", "na", "none"):
+            section_data[field] = value
+            applied.append(f"{field}={value}")
+
+    if applied:
+        print(f"[vision] prefilled: {', '.join(applied)}")
+
+
+# ── Vision image handling (mid-intake + cold-start) ───────────────────────────
+
+async def _handle_intake_image(
+    session_id: str,
+    session: dict,
+    image_b64: str,
+    image_type: str,
+    image_filename: str
+) -> Optional[dict]:
+    """
+    Runs vision agent when an image arrives during intake (mid-intake or cold-start).
+
+    Returns a ChatResponse dict when the vision agent should respond directly.
+    Returns None only when observations were found and injected silently into
+    vision_context — intake will fold the question into its next response.
+    """
+    is_cold_start = (session["step"] == "greet" and not session.get("incident_type"))
+    trigger_context = "cold_start" if is_cold_start else "mid_intake"
+    report_state = session.get("report", {})
+
+    print(f"[chat] image received — context: {trigger_context}, session: {session_id}")
+
+    result = await analyze_image(
+        image_b64=image_b64,
+        image_type=image_type or "image/jpeg",
+        report_state=report_state,
+        trigger_context=trigger_context
+    )
+
+    # Bad image — respond with retake request, do not continue intake
+    if not result["quality_ok"]:
+        quality_message = result["reporter_message"]
+        if is_cold_start:
+            session["step"] = "await_incident_type"
+        save_message(session, quality_message, is_user=False)
+        return {
+            "response": quality_message,
+            "show_widget": None,
+            "extracted": get_report_with_incident_type(session),
+            "options": None
+        }
+
+    # Apply any field suggestions as soft prefills — happens regardless of observations
+    field_suggestions = result.get("field_suggestions", {})
+    if field_suggestions:
+        _apply_field_suggestions(session, field_suggestions)
+
+    priority_obs = result.get("priority_observation")
+    reporter_message = result.get("reporter_message", "")
+
+    # Inject priority observation into vision_context for intake agent to fold in
+    if priority_obs and reporter_message:
+        vision_context = session.get("vision_context", [])
+        vision_context.append({
+            "observation": priority_obs,
+            "reporter_message": reporter_message,
+            "added_at": datetime.utcnow().isoformat()
+        })
+        session["vision_context"] = vision_context
+
+    # ── Cold-start ─────────────────────────────────────────────────────────────
+    # Skip the greeting entirely — use the vision message as the opening question
+    if is_cold_start:
+        session["step"] = "await_incident_type"
+        if reporter_message:
+            # Already consumed as opening — remove from vision_context if it was added
+            if priority_obs and session.get("vision_context"):
+                session["vision_context"].pop(0)
+            session["last_question"] = reporter_message
+            save_message(session, reporter_message, is_user=False)
+            return {
+                "response": reporter_message,
+                "show_widget": None,
+                "extracted": get_report_with_incident_type(session),
+                "options": INCIDENT_TYPE_OPTIONS
+            }
+        # Truly nothing to say — fall through to normal greeting
+        return None
+
+    # ── Mid-intake, observations found ─────────────────────────────────────────
+    # Injected into vision_context above. Return None so smart_process_message
+    # folds the question naturally into the next field question.
+    if priority_obs:
+        return None
+
+    # ── Mid-intake, 0 observations ─────────────────────────────────────────────
+    # vision_agent described the scene and produced a confirmable question.
+    # Return it directly — never return None here (causes blank frontend turn).
+    if reporter_message:
+        save_message(session, reporter_message, is_user=False)
+        return {
+            "response": reporter_message,
+            "show_widget": None,
+            "extracted": get_report_with_incident_type(session),
+            "options": None
+        }
+
+    # Absolute fallback — should rarely be reached
+    fallback = "I received your photo. Could you describe what happened in your own words?"
+    save_message(session, fallback, is_user=False)
+    return {
+        "response": fallback,
+        "show_widget": None,
+        "extracted": get_report_with_incident_type(session),
+        "options": None
+    }
+
+
+
+# ── Shared submit handler ─────────────────────────────────────────────────────
+
+async def _handle_submit(
+    session_id: str,
+    session: dict,
+    current_user: User,
+    db: Session,
+    get_report_fn,
+    background_tasks: BackgroundTasks,
+    narrative: str = None
+) -> ChatResponse:
     incident_type = session.get("incident_type", "")
     final_report = get_report_fn(session)
 
@@ -123,6 +310,14 @@ async def _handle_submit(session_id: str, session: dict, current_user: User, db:
         db=db
     )
 
+    # Fire vision reasoning gate as background task — fully decoupled from request
+    background_tasks.add_task(
+        _vision_gate_wrapper,
+        db_report.id,
+        formatted["report_json"],
+        incident_type
+    )
+
     print(f"[chat] report #{db_report.id} submitted by {current_user.username} — flagged: {is_flagged} — similar: {len(similar)}")
 
     return ChatResponse(
@@ -157,10 +352,32 @@ async def start_chat(
 @router.post("/message", response_model=ChatResponse)
 async def chat_message(
     request: ChatRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     session_id = request.session_id or str(uuid.uuid4())
+
+    # ── Image handling — runs before process_message ──────────────────────────
+    if request.image_b64:
+        session = get_session(session_id)
+        vision_result = await _handle_intake_image(
+            session_id=session_id,
+            session=session,
+            image_b64=request.image_b64,
+            image_type=request.image_type or "image/jpeg",
+            image_filename=request.image_filename or "image.jpg"
+        )
+        # Vision responded directly (bad quality or cold-start first message)
+        if vision_result is not None:
+            return ChatResponse(
+                session_id=session_id,
+                response=vision_result["response"],
+                show_widget=vision_result.get("show_widget"),
+                extracted=vision_result.get("extracted"),
+                options=vision_result.get("options")
+            )
+        # Vision injected silently — fall through to process_message below
 
     result = await process_message(
         session_id=session_id,
@@ -171,7 +388,11 @@ async def chat_message(
 
     if result.get("response") == "__SUBMIT__":
         session = get_session(session_id)
-        response = await _handle_submit(session_id, session, current_user, db, get_report_with_incident_type)
+        response = await _handle_submit(
+            session_id, session, current_user, db,
+            get_report_with_incident_type,
+            background_tasks
+        )
         clear_session(session_id)
         return response
 
@@ -296,10 +517,32 @@ async def smart_start_chat(
 @router.post("/smart-message", response_model=ChatResponse)
 async def smart_chat_message(
     request: ChatRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     session_id = request.session_id or str(uuid.uuid4())
+
+    # ── Image handling — runs before smart_process_message ────────────────────
+    if request.image_b64:
+        # Smart mode uses smart_get_session but vision logic is identical
+        from agents.smart_intake import get_session as smart_get_sess
+        session = smart_get_sess(session_id)
+        vision_result = await _handle_intake_image(
+            session_id=session_id,
+            session=session,
+            image_b64=request.image_b64,
+            image_type=request.image_type or "image/jpeg",
+            image_filename=request.image_filename or "image.jpg"
+        )
+        if vision_result is not None:
+            return ChatResponse(
+                session_id=session_id,
+                response=vision_result["response"],
+                show_widget=vision_result.get("show_widget"),
+                extracted=vision_result.get("extracted"),
+                options=vision_result.get("options")
+            )
 
     result = await smart_process_message(
         session_id=session_id,
@@ -314,6 +557,7 @@ async def smart_chat_message(
         response = await _handle_submit(
             session_id, session, current_user, db,
             smart_get_report_with_incident_type,
+            background_tasks,
             narrative=narrative
         )
         smart_clear_session(session_id)
@@ -406,8 +650,6 @@ async def smart_resume_chat(
 
     print(f"[chat] smart session {request.session_id} resumed — incident_type: {incident_type}")
 
-    # LLM picks up naturally from full conversation history
-    # Just send a resume trigger so it greets the user and continues
     result = await smart_process_message(
         session_id=request.session_id,
         user_message="I'm back, let's continue."

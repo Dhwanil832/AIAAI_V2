@@ -14,4 +14,7 @@ class Notification(Base):
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Type: "general" (default) | "witness" — used by frontend to route click behaviour
+    notification_type = Column(String, nullable=True, default="general")
+
     user = relationship("User", backref="notifications")

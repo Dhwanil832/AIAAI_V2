@@ -5,7 +5,7 @@ from fastapi.security import HTTPBearer
 from core.ollama import check_ollama_connection
 from core.qdrant import ensure_collection_exists
 from core.minio import ensure_bucket_exists
-from routers import auth, chat, reports, unfinished, uploads, dashboard, historical, users, notifications, transcribe
+from routers import auth, chat, reports, unfinished, uploads, dashboard, historical, users, notifications, transcribe, vision
 
 security = HTTPBearer()
 
@@ -57,6 +57,7 @@ app.include_router(historical.router, prefix="/historical", tags=["historical"])
 app.include_router(users.router, prefix="/users", tags=["users"])
 app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 app.include_router(transcribe.router, prefix="/transcribe", tags=["transcribe"])
+app.include_router(vision.router, prefix="/vision", tags=["vision"])
 
 @app.get("/")
 async def root():

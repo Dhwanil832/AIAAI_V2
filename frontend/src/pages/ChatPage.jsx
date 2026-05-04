@@ -5,6 +5,7 @@ import {
   startChat, sendMessage, saveProgress, resumeChat,
   startSmartChat, sendSmartMessage, saveSmartProgress, resumeSmartChat
 } from '../api/chat'
+import { fileToBase64 } from '../api/vision'
 import ThemeToggle from '../components/ThemeToggle'
 import NotificationBell from '../components/NotificationBell'
 
@@ -139,33 +140,38 @@ export default function ChatPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
-  // Determine mode from URL — ?mode=smart activates smart investigator flow
   const isSmartMode = searchParams.get('mode') === 'smart'
 
-  const [messages, setMessages] = useState([])
-  const [sessionId, setSessionId] = useState(null)
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [options, setOptions] = useState(null)
-  const [showWidget, setShowWidget] = useState(null)
-  const [extracted, setExtracted] = useState(null)
-  const [done, setDone] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [saveMsg, setSaveMsg] = useState(null)
+  const [messages, setMessages]             = useState([])
+  const [sessionId, setSessionId]           = useState(null)
+  const [input, setInput]                   = useState('')
+  const [loading, setLoading]               = useState(false)
+  const [options, setOptions]               = useState(null)
+  const [showWidget, setShowWidget]         = useState(null)
+  const [extracted, setExtracted]           = useState(null)
+  const [done, setDone]                     = useState(false)
+  const [saving, setSaving]                 = useState(false)
+  const [saveMsg, setSaveMsg]               = useState(null)
   const [similarIncidents, setSimilarIncidents] = useState(null)
   const [suggestedActions, setSuggestedActions] = useState(null)
-  const [reportId, setReportId] = useState(null)
-  const bottomRef = useRef(null)
-  const mediaRecorderRef = useRef(null)
-  const audioChunksRef = useRef([])
-  const [recording, setRecording] = useState(false)
-  const [transcribing, setTranscribing] = useState(false)
+  const [reportId, setReportId]             = useState(null)
   const [selectedIncident, setSelectedIncident] = useState(null)
+
+  // Voice recording state
+  const [recording, setRecording]           = useState(false)
+  const [transcribing, setTranscribing]     = useState(false)
+  const mediaRecorderRef                    = useRef(null)
+  const audioChunksRef                      = useRef([])
+
+  // Image state
+  const [pendingImage, setPendingImage]     = useState(null) // { b64, type, filename, preview }
+  const imageFileRef                        = useRef(null)
+
+  const bottomRef = useRef(null)
 
   useEffect(() => {
     const resumeSessionId = searchParams.get('resume')
     const resumeMode = searchParams.get('resumeMode')
-    // Reset all state when mode changes
     setMessages([])
     setSessionId(null)
     setOptions(null)
@@ -177,6 +183,7 @@ export default function ChatPage() {
     setSimilarIncidents(null)
     setSuggestedActions(null)
     setReportId(null)
+    setPendingImage(null)
     if (resumeSessionId) {
       initResume(resumeSessionId, resumeMode === 'smart')
     } else {
@@ -221,56 +228,115 @@ export default function ChatPage() {
     }
   }
 
-  const addMessage = (text, sender) => {
-    setMessages(prev => [...prev, { text, sender, id: Date.now() + Math.random() }])
+  const addMessage = (text, sender, imagePreview = null) => {
+    setMessages(prev => [...prev, {
+      text,
+      sender,
+      imagePreview,
+      id: Date.now() + Math.random()
+    }])
   }
 
   const addSummaryMessage = (text) => {
     setMessages(prev => [...prev, { text, sender: 'summary', id: Date.now() + Math.random() }])
   }
 
+  // ── Image selection ───────────────────────────────────────────────────────
+
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    try {
+      const b64 = await fileToBase64(file)
+      const preview = URL.createObjectURL(file)
+      setPendingImage({
+        b64,
+        type: file.type || 'image/jpeg',
+        filename: file.name,
+        preview
+      })
+    } catch (err) {
+      console.error('Image read failed:', err)
+    }
+
+    // Reset so same file can be re-selected if needed
+    if (imageFileRef.current) imageFileRef.current.value = ''
+  }
+
+  const clearPendingImage = () => {
+    if (pendingImage?.preview) URL.revokeObjectURL(pendingImage.preview)
+    setPendingImage(null)
+  }
+
+  // ── Send handler ──────────────────────────────────────────────────────────
+
   const handleSend = async (text, isButton = false) => {
-    if (!text.trim() || loading || done) return
-    addMessage(text, 'user')
+    const hasText  = text && text.trim()
+    const hasImage = !!pendingImage
+
+    if (!hasText && !hasImage) return
+    if (loading || done) return
+
+    // Show user message with optional image thumbnail
+    addMessage(hasText ? text : '', 'user', pendingImage?.preview || null)
     setInput('')
     setOptions(null)
     setShowWidget(null)
     setLoading(true)
 
+    // Capture image before clearing.
+    // Use setPendingImage(null) directly — NOT clearPendingImage() — because
+    // the blob URL was just stored in the message bubble and must stay alive.
+    // clearPendingImage() revokes the URL immediately, breaking the <img> tag.
+    const imageTosend = pendingImage ? { ...pendingImage } : null
+    setPendingImage(null)
+    if (imageFileRef.current) imageFileRef.current.value = ''
+
     try {
       let buttonChoice = isButton ? text : null
-      // Standard mode button mappings
       if (text === "Yes, that's correct") buttonChoice = 'confirm_incident_type'
-      if (text === "That's not right") buttonChoice = 'wrong_incident_type'
+      if (text === "That's not right")    buttonChoice = 'wrong_incident_type'
 
       const data = isSmartMode
-        ? await sendSmartMessage(sessionId, isButton ? null : text, buttonChoice)
-        : await sendMessage(sessionId, isButton ? null : text, buttonChoice)
+        ? await sendSmartMessage(
+            sessionId,
+            isButton ? null : (hasText ? text : null),
+            buttonChoice,
+            null,
+            imageTosend?.b64  || null,
+            imageTosend?.type || null,
+            imageTosend?.filename || null
+          )
+        : await sendMessage(
+            sessionId,
+            isButton ? null : (hasText ? text : null),
+            buttonChoice,
+            null,
+            imageTosend?.b64  || null,
+            imageTosend?.type || null,
+            imageTosend?.filename || null
+          )
 
       if (data.response === '__SUBMIT__' || data.report_id) {
         addMessage(`Report submitted successfully! Report ID: #${data.report_id}`, 'bot')
         setDone(true)
         setExtracted(null)
         setReportId(data.report_id)
-
-        if (data.similar_incidents && data.similar_incidents.length > 0) {
-          setSimilarIncidents(data.similar_incidents)
-        }
-        if (data.suggested_actions && data.suggested_actions.length > 0) {
-          setSuggestedActions(data.suggested_actions)
-        }
+        if (data.similar_incidents?.length > 0) setSimilarIncidents(data.similar_incidents)
+        if (data.suggested_actions?.length > 0) setSuggestedActions(data.suggested_actions)
         return
       }
 
       addMessage(data.response, 'bot')
-      if (data.options) setOptions(data.options)
+      if (data.options)    setOptions(data.options)
       if (data.show_widget) setShowWidget(data.show_widget)
-      if (data.extracted) setExtracted(data.extracted)
-      // If summary-buttons are shown, re-render last message as summary card
+      if (data.extracted)  setExtracted(data.extracted)
+
       if (data.show_widget === 'summary-buttons') {
         setMessages(prev => {
           const updated = [...prev]
-          const last = updated[updated.length - 1]
+          const last    = updated[updated.length - 1]
           if (last && last.sender === 'bot') {
             updated[updated.length - 1] = { ...last, sender: 'summary' }
           }
@@ -321,7 +387,6 @@ export default function ChatPage() {
         try {
           const formData = new FormData()
           formData.append('file', blob, 'audio.webm')
-
           const token = localStorage.getItem('token')
           const res = await fetch('http://localhost:8000/transcribe/', {
             method: 'POST',
@@ -329,9 +394,7 @@ export default function ChatPage() {
             body: formData
           })
           const data = await res.json()
-          if (data.text) {
-            setInput(prev => prev ? `${prev} ${data.text}` : data.text)
-          }
+          if (data.text) setInput(prev => prev ? `${prev} ${data.text}` : data.text)
         } catch (e) {
           console.error('Transcription failed:', e)
         } finally {
@@ -372,8 +435,8 @@ export default function ChatPage() {
     setSimilarIncidents(null)
     setSuggestedActions(null)
     setReportId(null)
+    clearPendingImage()
     navigate(smart ? '/chat?mode=smart' : '/chat', { replace: true })
-    // Small delay to let URL update before initChat reads searchParams
     setTimeout(() => window.location.reload(), 50)
   }
 
@@ -524,9 +587,20 @@ export default function ChatPage() {
                       ? 'bg-red-950 border border-red-800 text-red-400 font-mono'
                       : 'bg-gray-800 text-gray-100'
                   }`}
-                  dangerouslySetInnerHTML={msg.sender === 'bot' ? renderMarkdown(msg.text) : undefined}
                 >
-                  {msg.sender !== 'bot' ? msg.text : undefined}
+                  {/* Image thumbnail in user message bubble */}
+                  {msg.imagePreview && (
+                    <img
+                      src={msg.imagePreview}
+                      alt="Attached"
+                      className="max-w-full rounded-md mb-2 max-h-48 object-cover"
+                    />
+                  )}
+                  {msg.sender === 'bot' ? (
+                    <span dangerouslySetInnerHTML={renderMarkdown(msg.text)} />
+                  ) : (
+                    msg.text && <span>{msg.text}</span>
+                  )}
                 </div>
               )}
             </div>
@@ -595,7 +669,7 @@ export default function ChatPage() {
             </div>
           )}
 
-          {/* Similar incidents — shown after submit */}
+          {/* Similar incidents */}
           {done && similarIncidents && similarIncidents.length > 0 && (
             <div className="mt-4">
               <div className="text-gray-500 text-xs font-mono uppercase tracking-wider mb-3">
@@ -609,15 +683,13 @@ export default function ChatPage() {
             </div>
           )}
 
-          {/* Suggested corrective actions — shown after submit */}
+          {/* Suggested corrective actions */}
           {done && suggestedActions && suggestedActions.length > 0 && (
             <div className="mt-4">
               <div className="text-gray-500 text-xs font-mono uppercase tracking-wider mb-2">
                 Suggested Corrective Actions
               </div>
-              <p className="text-gray-600 text-xs font-mono mb-3">
-                Based on similar past incidents. Click to copy.
-              </p>
+              <p className="text-gray-600 text-xs font-mono mb-3">Based on similar past incidents. Click to copy.</p>
               <div className="flex flex-wrap gap-2">
                 {suggestedActions.map((action, i) => (
                   <button
@@ -652,20 +724,15 @@ export default function ChatPage() {
             <div className="flex flex-wrap gap-x-6 gap-y-1">
               {(() => {
                 const incidentType = extracted.basic_info?.incident_type || ''
-                // Always show basic_info + the relevant section if known
                 const sectionsToShow = ['basic_info']
                 if (incidentType === 'Personal Injuries') sectionsToShow.push('injury_data')
                 else if (incidentType === 'Near Miss') sectionsToShow.push('near_miss_data')
                 else if (incidentType === 'Equipment Damage') sectionsToShow.push('equipment_damage_data')
                 else {
-                  // incident_type not yet known — show all sections that have data
                   ;['injury_data', 'near_miss_data', 'equipment_damage_data'].forEach(s => {
-                    if (extracted[s] && Object.values(extracted[s]).some(v => v)) {
-                      sectionsToShow.push(s)
-                    }
+                    if (extracted[s] && Object.values(extracted[s]).some(v => v)) sectionsToShow.push(s)
                   })
                 }
-
                 return sectionsToShow.map(section =>
                   extracted[section] && typeof extracted[section] === 'object'
                     ? Object.entries(extracted[section]).map(([k, v]) =>
@@ -683,10 +750,50 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* Input */}
+        {/* Input bar */}
         {!done && (
-          <div className="border-t border-gray-800 p-4">
-            <div className="flex gap-3">
+          <div className="border-t border-gray-800 p-4 space-y-2">
+
+            {/* Image preview strip */}
+            {pendingImage && (
+              <div className="flex items-center gap-2">
+                <img
+                  src={pendingImage.preview}
+                  alt="Pending"
+                  className="h-14 w-14 object-cover rounded-md border border-gray-700"
+                />
+                <div className="text-gray-500 text-xs font-mono truncate flex-1">{pendingImage.filename}</div>
+                <button
+                  onClick={clearPendingImage}
+                  className="text-gray-600 hover:text-red-400 text-xs font-mono transition-colors"
+                >
+                  ✕ Remove
+                </button>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {/* Hidden image file input */}
+              <input
+                ref={imageFileRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleImageSelect}
+                className="hidden"
+              />
+
+              {/* Image button */}
+              <button
+                onClick={() => imageFileRef.current?.click()}
+                disabled={loading || done}
+                title="Attach a photo"
+                className="px-3 py-3 rounded transition-colors font-mono text-sm disabled:opacity-40 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white"
+              >
+                📷
+              </button>
+
+              {/* Text input */}
               <input
                 type="text"
                 value={input}
@@ -695,11 +802,14 @@ export default function ChatPage() {
                 disabled={loading || transcribing}
                 placeholder={
                   transcribing ? 'Transcribing...' :
+                  pendingImage ? 'Add a message or just send the photo...' :
                   isSmartMode ? 'Describe what happened...' :
                   'Type your message...'
                 }
                 className="flex-1 bg-gray-900 border border-gray-800 text-white px-4 py-3 rounded focus:outline-none focus:border-orange-500 transition-colors font-mono text-sm disabled:opacity-50"
               />
+
+              {/* Mic button */}
               <button
                 onMouseDown={handleMicStart}
                 onMouseUp={handleMicStop}
@@ -717,9 +827,11 @@ export default function ChatPage() {
               >
                 {recording ? '⏹' : transcribing ? '...' : '🎤'}
               </button>
+
+              {/* Send button */}
               <button
                 onClick={() => handleSend(input)}
-                disabled={loading || !input.trim()}
+                disabled={loading || (!input.trim() && !pendingImage)}
                 className="bg-orange-500 hover:bg-orange-400 disabled:bg-gray-800 disabled:text-gray-600 text-white px-5 py-3 rounded transition-colors font-mono text-sm"
               >
                 Send

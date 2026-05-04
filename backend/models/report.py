@@ -14,6 +14,8 @@ class IncidentReport(Base):
     report_json = Column(JSON, nullable=False)
 
     # Context document — full narrative, chat history, everything
+    # Also stores witness_accounts: [{username, submitted_at, account}]
+    # and ai_summary: str (generated from all accounts)
     context_document = Column(JSON, nullable=True)
 
     # Creator info
@@ -32,6 +34,10 @@ class IncidentReport(Base):
     similar_incidents = Column(JSON, nullable=True)
     supervisor_notified = Column(Boolean, default=False)
 
+    # Witness nominations — list of {username, status, nominated_at, submitted_at}
+    # status: "pending" | "submitted"
+    witness_nominations = Column(JSON, nullable=True, default=None)
+
     # Review workflow
     # Status: submitted → under_review → approved / needs_more_info / closed
     status = Column(String, default="submitted", nullable=False)
@@ -46,3 +52,4 @@ class IncidentReport(Base):
     # Relationships
     user = relationship("User", back_populates="reports")
     uploaded_files = relationship("UploadedFile", back_populates="report")
+    vision_threads = relationship("VisionThread", back_populates="report")

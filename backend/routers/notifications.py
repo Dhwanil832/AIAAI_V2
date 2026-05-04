@@ -69,5 +69,6 @@ def serialize(n: Notification) -> dict:
         "message": n.message,
         "report_id": n.report_id,
         "is_read": n.is_read,
+        "notification_type": n.notification_type or "general",
         "created_at": n.created_at.isoformat() if n.created_at else None,
     }

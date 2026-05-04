@@ -21,6 +21,7 @@ class UnfinishedReport(Base):
     # Relationships
     user = relationship("User", back_populates="unfinished_reports")
     uploaded_files = relationship("UploadedFile", back_populates="unfinished_report")
+    vision_threads = relationship("VisionThread", back_populates="unfinished_report")
 
 
 class UploadedFile(Base):
@@ -41,5 +42,3 @@ class UploadedFile(Base):
     # Relationships
     report = relationship("IncidentReport", back_populates="uploaded_files")
     unfinished_report = relationship("UnfinishedReport", back_populates="uploaded_files")
-
-

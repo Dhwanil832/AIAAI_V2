@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { uploadHistorical, getHistoricalStats } from '../api/historical'
 import { listUsers, createUser, updateUser, resetPassword, deleteUser } from '../api/users'
+import { exportReports } from '../api/reports'
 import ThemeToggle from '../components/ThemeToggle'
 import NotificationBell from '../components/NotificationBell'
 
@@ -112,6 +113,14 @@ export default function AdminPage() {
     username: '', password: '', email: '', job_title: '', role: 'user'
   })
 
+  // Export state
+  const [exportDateRange, setExportDateRange] = useState('all')
+  const [exportIncidentType, setExportIncidentType] = useState('')
+  const [exportLocation, setExportLocation] = useState('')
+  const [exportFlagged, setExportFlagged] = useState('')
+  const [exportLoading, setExportLoading] = useState(false)
+  const [exportMsg, setExportMsg] = useState(null)
+
   useEffect(() => {
     fetchStats()
     fetchUsers()
@@ -215,6 +224,27 @@ export default function AdminPage() {
       console.error('Failed to load stats')
     } finally {
       setStatsLoading(false)
+    }
+  }
+
+  const handleExport = async (format) => {
+    setExportLoading(true)
+    setExportMsg(null)
+    try {
+      await exportReports({
+        format,
+        date_range: exportDateRange,
+        incident_type: exportIncidentType || null,
+        location: exportLocation || null,
+        flagged: exportFlagged === '' ? null : exportFlagged === 'true',
+      })
+      setExportMsg(`${format.toUpperCase()} exported successfully`)
+      setTimeout(() => setExportMsg(null), 3000)
+    } catch (e) {
+      setExportMsg('Export failed')
+      setTimeout(() => setExportMsg(null), 3000)
+    } finally {
+      setExportLoading(false)
     }
   }
 
@@ -417,6 +447,102 @@ export default function AdminPage() {
                 </table>
               </div>
             )}
+          </div>
+
+          {/* Export Reports */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-gray-500 text-xs font-mono uppercase tracking-wider">
+                Export Reports
+              </div>
+              {exportMsg && (
+                <span className={`text-xs font-mono ${exportMsg.includes('failed') ? 'text-red-400' : 'text-green-400'}`}>
+                  {exportMsg}
+                </span>
+              )}
+            </div>
+
+            <div className="bg-gray-900 border border-gray-800 rounded-lg p-5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+
+                {/* Date Range */}
+                <div>
+                  <label className="text-gray-500 text-xs font-mono block mb-1">Date Range</label>
+                  <select
+                    value={exportDateRange}
+                    onChange={e => setExportDateRange(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 text-white text-xs font-mono px-3 py-2 rounded focus:outline-none focus:border-orange-500 transition-colors"
+                  >
+                    <option value="all">All Time</option>
+                    <option value="30d">Last 30 Days</option>
+                    <option value="3m">Last 3 Months</option>
+                    <option value="6m">Last 6 Months</option>
+                    <option value="1y">Last Year</option>
+                  </select>
+                </div>
+
+                {/* Incident Type */}
+                <div>
+                  <label className="text-gray-500 text-xs font-mono block mb-1">Incident Type</label>
+                  <select
+                    value={exportIncidentType}
+                    onChange={e => setExportIncidentType(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 text-white text-xs font-mono px-3 py-2 rounded focus:outline-none focus:border-orange-500 transition-colors"
+                  >
+                    <option value="">All Types</option>
+                    <option value="Personal Injuries">Personal Injuries</option>
+                    <option value="Near Miss">Near Miss</option>
+                    <option value="Equipment Damage">Equipment Damage</option>
+                  </select>
+                </div>
+
+                {/* Location */}
+                <div>
+                  <label className="text-gray-500 text-xs font-mono block mb-1">Location</label>
+                  <input
+                    type="text"
+                    value={exportLocation}
+                    onChange={e => setExportLocation(e.target.value)}
+                    placeholder="e.g. rolling mill"
+                    className="w-full bg-gray-800 border border-gray-700 text-white text-xs font-mono px-3 py-2 rounded focus:outline-none focus:border-orange-500 transition-colors"
+                  />
+                </div>
+
+                {/* Flagged */}
+                <div>
+                  <label className="text-gray-500 text-xs font-mono block mb-1">Flagged</label>
+                  <select
+                    value={exportFlagged}
+                    onChange={e => setExportFlagged(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 text-white text-xs font-mono px-3 py-2 rounded focus:outline-none focus:border-orange-500 transition-colors"
+                  >
+                    <option value="">All Reports</option>
+                    <option value="true">Flagged Only</option>
+                    <option value="false">Not Flagged</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => handleExport('json')}
+                  disabled={exportLoading}
+                  className="bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-white text-xs font-mono px-4 py-2 rounded transition-colors"
+                >
+                  {exportLoading ? 'Exporting...' : '↓ Export JSON'}
+                </button>
+                <button
+                  onClick={() => handleExport('csv')}
+                  disabled={exportLoading}
+                  className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 border border-gray-700 text-white text-xs font-mono px-4 py-2 rounded transition-colors"
+                >
+                  {exportLoading ? 'Exporting...' : '↓ Export CSV'}
+                </button>
+                <span className="text-gray-600 text-xs font-mono">
+                  JSON includes full context · CSV is flat and Excel-friendly
+                </span>
+              </div>
+            </div>
           </div>
 
         </div>

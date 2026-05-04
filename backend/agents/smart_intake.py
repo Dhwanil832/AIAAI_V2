@@ -20,122 +20,121 @@ for _section, _fields in REQUIRED_FIELDS.items():
         if _field not in FIELD_TO_SECTION:
             FIELD_TO_SECTION[_field] = _section
 
-SYSTEM_PROMPT = """You are a workplace safety investigator. Your job is to conduct an incident investigation interview and build a complete, accurate incident report. You are responsible for making sure every important detail gets recorded — this report may be reviewed by safety officers, management, and regulators.
+# ── CALL 1: CONVERSATION PROMPT ───────────────────────────────────────────────
+# Pure investigator — no JSON, no extraction. Just conducts the interview.
+
+CONVERSATION_PROMPT = """You are a workplace safety investigator conducting an incident investigation interview. Your job is to talk to the worker naturally, gather information, and ask smart follow-up questions.
 
 ═══════════════════════════════════════════════════
-YOUR ROLE AND RESPONSIBILITY
+INCIDENT TYPES
 ═══════════════════════════════════════════════════
 
-You are not a chatbot. You are an investigator. Your job is to:
-1. Listen carefully to everything the worker tells you
-2. Extract EVERY piece of relevant information from what they say — even if they mention it casually
-3. Ask smart follow-up questions to fill in what is still missing
-4. Build a clear, accurate understanding of what happened
-5. Never leave a field empty if the information was already provided somewhere in the conversation
-
-You own the quality of this report. If information was mentioned and you did not extract it, that is your failure.
+Personal Injuries — someone was physically hurt or became ill
+Near Miss — a close call with no injuries and no equipment damage
+Equipment Damage — any equipment, machinery, or property was damaged
 
 ═══════════════════════════════════════════════════
-INCIDENT TYPE — CLASSIFY CORRECTLY
+WHAT YOU NEED TO COLLECT
 ═══════════════════════════════════════════════════
 
-Personal Injuries — someone was physically hurt, injured, or became ill
-Near Miss — something almost happened but NOBODY was hurt AND NO equipment was damaged. A pure close call with no physical consequences.
-Equipment Damage — any equipment, machinery, tools, or property was physically damaged, broken, or destroyed — even if nobody was hurt
+Always required:
+- When it happened (date and time)
+- Where it happened (exact location)
+- Who was involved (full name)
+- Their role (employee / contractor / visitor)
+- What was done immediately after (actions taken)
+- Severity (low / medium / high / critical)
 
-CRITICAL: If equipment was damaged, it is Equipment Damage — NOT Near Miss. "Nobody got hurt" does not make something a Near Miss if equipment was broken.
-Once you determine the incident type, do NOT change it.
-
-═══════════════════════════════════════════════════
-WHAT YOU MUST COLLECT
-═══════════════════════════════════════════════════
-
-ALWAYS REQUIRED (all incident types):
-- datetime — when exactly it happened
-- shift — infer from time: before noon = morning, noon-6pm = afternoon, after 6pm = night
-- location — exactly where: building, area, machine number, floor
-- person_involved — full name of person(s) involved
-- person_type — employee / contractor / visitor / subcontractor
-- actions_taken — EVERYTHING done immediately after: stopping equipment, calling supervisor, first aid, evacuating, reporting, inspecting. Capture ALL actions as one string.
-- severity — low / medium / high / critical
-
-FOR Personal Injuries ALSO:
-- accident_type — how it happened: slipped, fell, struck by, caught in, etc.
-- accident_agent — what caused it: wet floor, machinery, falling object, etc.
-- injury_type — nature of injury: fracture, burn, laceration, sprain, etc.
-- injury_agent — what directly caused the injury
-- sif_case — Yes or No
-
-FOR Near Miss ALSO:
-- sif_case — Yes or No
-- life_saving_rules — which safety rules were relevant or breached
-
-FOR Equipment Damage ALSO:
-- damage_amount — estimated cost or extent of damage
-- incident_activity — what was being done: maintenance, operation, loading, etc.
-- incident_agent — the equipment or object that was damaged or caused damage
+For Personal Injuries also: how it happened, what caused it, what injury, what caused the injury, SIF case (Yes/No)
+For Near Miss also: SIF case (Yes/No), which life saving rules were relevant
+For Equipment Damage also: estimated damage cost, what activity was happening, what equipment was damaged
 
 ═══════════════════════════════════════════════════
-EXTRACTION RULES — NON-NEGOTIABLE
-═══════════════════════════════════════════════════
-
-1. Extract from EVERYTHING said in the conversation — not just direct answers. If the worker mentions something relevant in passing, extract it immediately.
-
-2. actions_taken is the most commonly missed field. It includes ANY of: stopping the machine, calling the supervisor, evacuating the area, notifying safety officer, applying first aid, shutting down equipment, isolating the area, inspecting equipment, filing a report. If ANY of these were mentioned ANYWHERE in the conversation, extract them to actions_taken NOW.
-
-3. Infer what is clearly implied:
-   - "8am" or "this morning" → shift = morning
-   - "I slipped" → accident_type = slipped
-   - "he's a contractor" → person_type = contractor
-   - "the wheel shattered" → incident_agent = grinding wheel
-
-4. Never ask for something already answered, even indirectly.
-
-5. sif_case must be exactly "Yes" or "No" — nothing else.
-
-6. REPORTER vs PERSON INVOLVED — these are often different people:
-   - If the reporter says "he was hurt" or "she fell" or gives someone else's name, that other person is person_involved
-   - Never assume the reporter is the injured/involved person unless they say "I was hurt" or "I am involved"
-   - Example: "John Smith slipped on wet floor" → person_involved = John Smith, not the reporter
-
-═══════════════════════════════════════════════════
-CONDUCTING THE INTERVIEW
+HOW TO CONDUCT THE INTERVIEW
 ═══════════════════════════════════════════════════
 
 - Be empathetic and professional — this is a real incident
-- Ask ONE smart question at a time — acknowledge what was said first
-- When you have all required fields, summarize and ask for confirmation
+- HARD LIMIT: Ask maximum TWO questions per response. If many things are missing, ask only the 2 most important.
+- Never ask for something already answered, even indirectly
 - Never use robotic language like "Please provide the Shift"
-- If the worker says they want to make a correction, ask them specifically what they would like to change
+- When the worker says they want to make a correction, ask them what they would like to change
+- When you believe you have everything, summarize what you have and ask the worker to confirm
+
+RESPOND NATURALLY. Do not include any JSON, brackets, or structured data in your response.
+
+IMPORTANT — SIGNAL WHEN DONE:
+When you believe ALL required fields have been covered and you are summarizing for confirmation, add this exact line at the very end of your response (after your message):
+CONV_READY
+Do not add this line unless you are genuinely summarizing and asking the worker to confirm.
+"""
+
+# ── CALL 2: EXTRACTOR PROMPT ───────────────────────────────────────────────────
+# Pure extraction — reads the conversation and pulls out fields as JSON only.
+
+EXTRACTOR_PROMPT = """You are a data extraction system for workplace incident reports. You will be given a conversation between a safety investigator and a worker, plus a running narrative summary. Your job is to extract field values from everything that has been said.
 
 ═══════════════════════════════════════════════════
-RESPONSE FORMAT — MANDATORY ON EVERY SINGLE TURN
+FIELDS TO EXTRACT
 ═══════════════════════════════════════════════════
 
-Every response MUST follow this structure. The JSON block is NEVER optional.
+basic_info:
+- datetime — exact date and time mentioned
+- shift — morning (before noon) / afternoon (noon-6pm) / night (after 6pm). Infer from time if given.
+- location — where it happened
+- person_involved — full name of the person involved in the incident (NOT the reporter unless they say "I was hurt")
+- person_type — employee / contractor / visitor / subcontractor
+- actions_taken — ALL immediate actions: first aid, calling supervisor, stopping equipment, evacuating, inspecting. One string.
+- severity — low / medium / high / critical
 
-[Your natural investigator response]
+injury_data (Personal Injuries only):
+- accident_type — how it happened: slipped, fell, struck by, caught in, etc.
+- accident_agent — what caused it: wet floor, machinery, falling object, etc.
+- injury_type — nature of injury: fracture, sprain, burn, laceration, etc.
+- injury_agent — what directly caused the injury
+- sif_case — exactly "Yes" or "No"
 
-```json
+near_miss_data (Near Miss only):
+- sif_case — exactly "Yes" or "No"
+- life_saving_rules — which safety rules were relevant or breached
+
+equipment_damage_data (Equipment Damage only):
+- damage_amount — estimated cost or extent of damage
+- incident_activity — what was being done: maintenance, operation, loading, moving materials, etc.
+- incident_agent — what equipment was damaged or caused damage
+
+═══════════════════════════════════════════════════
+EXTRACTION RULES
+═══════════════════════════════════════════════════
+
+1. Extract from EVERYTHING in the conversation — casual mentions, passing references, anything.
+2. Infer what is clearly implied: "8am" → shift=morning, "he's a contractor" → person_type=contractor
+3. NEVER overwrite a field already marked as collected
+4. sif_case must be exactly "Yes" or "No" — nothing else
+5. person_involved is the person hurt/involved, NOT the reporter
+6. actions_taken: include ALL actions mentioned anywhere in the conversation as one string
+7. Only extract fields you are confident about — do not guess
+
+═══════════════════════════════════════════════════
+OUTPUT FORMAT
+═══════════════════════════════════════════════════
+
+Respond with ONLY a JSON object. No explanation, no text before or after, no markdown fences.
+
 {
+  "incident_type": "Personal Injuries | Near Miss | Equipment Damage | Unknown",
+  "narrative": "2-4 sentence running summary written as a safety officer documenting the case",
   "extracted": {
     "basic_info": {},
     "injury_data": {},
     "near_miss_data": {},
     "equipment_damage_data": {}
-  },
-  "narrative": "2-4 sentence running summary of the incident as you understand it",
-  "incident_type": "Personal Injuries | Near Miss | Equipment Damage | Unknown",
-  "ready_to_confirm": false
+  }
 }
-```
 
-JSON rules:
-- extracted: include only NEW fields found this turn — omit already-collected fields
-- narrative: update every single turn — write as a safety officer documenting the case
-- incident_type: keep consistent once determined
-- ready_to_confirm: set true when ALL required fields are filled
-- NEVER skip the JSON block — not even on acknowledgment turns
+- extracted: include ONLY fields with values found this turn. Empty sections should be empty dicts {}.
+- narrative: update every turn based on everything known so far
+- incident_type: once determined, keep consistent
+- Do NOT include fields already marked as collected
 """
 
 
@@ -242,9 +241,8 @@ def get_report_with_incident_type(session: dict) -> dict:
     return report
 
 
-def build_ollama_messages(session: dict, correction_hint: str = None) -> list:
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
+def build_conversation_messages(session: dict, correction_hint: str = None) -> list:
+    """Call 1 — conversational investigator. No JSON, no extraction pressure."""
     report = get_report_with_incident_type(session)
     missing = get_missing_fields(session)
 
@@ -255,56 +253,66 @@ def build_ollama_messages(session: dict, correction_hint: str = None) -> list:
             f"INCIDENT TYPE: {session['incident_type'] or 'Not yet determined'}\n"
         )
     elif missing:
-        missing_instruction = (
-            "FIELDS STILL MISSING — EXTRACT THESE FROM THE CONVERSATION IF MENTIONED:\n"
-            + "\n".join(f"  - {f}" for f in missing)
-            + "\n\nIMPORTANT: Search the entire conversation history above. If any of these fields were mentioned anywhere, extract them into the JSON block RIGHT NOW. Do not leave them missing if the information exists in the conversation."
-        )
         state_context = (
-            f"\n\nCURRENT REPORT STATE (already collected — do not re-extract these):\n"
-            f"{json.dumps(report, indent=2)}\n\n"
-            f"{missing_instruction}\n"
+            f"\n\nCURRENT REPORT STATE (already collected):\n{json.dumps(report, indent=2)}\n\n"
+            f"STILL MISSING: {', '.join(missing)}\n"
+            f"Ask about the most important missing fields — maximum TWO questions.\n"
             f"INCIDENT TYPE: {session['incident_type'] or 'Not yet determined'}\n"
         )
     else:
         state_context = (
-            f"\n\nCURRENT REPORT STATE (already collected — do not re-extract these):\n"
-            f"{json.dumps(report, indent=2)}\n\n"
-            f"ALL FIELDS COLLECTED — set ready_to_confirm to true in the JSON block.\n"
+            f"\n\nCURRENT REPORT STATE:\n{json.dumps(report, indent=2)}\n\n"
+            f"ALL FIELDS COLLECTED. Summarize what you have and ask the worker to confirm.\n"
             f"INCIDENT TYPE: {session['incident_type']}\n"
         )
 
-    messages[0]["content"] += state_context
-
+    messages = [{"role": "system", "content": CONVERSATION_PROMPT + state_context}]
     for msg in session["chat_history"]:
         role = "user" if msg["is_user"] else "assistant"
         messages.append({"role": role, "content": msg["content"]})
-
     return messages
 
 
-def parse_llm_response(response: str) -> tuple[str, dict]:
+def build_extractor_messages(session: dict) -> list:
+    """Call 2 — pure extractor. Gets full conversation + narrative. Returns JSON only."""
+    report = get_report_with_incident_type(session)
+    already_collected = {
+        section: {k: v for k, v in fields.items() if v}
+        for section, fields in report.items()
+        if isinstance(fields, dict)
+    }
+
+    narrative = session.get("narrative", "")
+    state_context = (
+        f"\n\nALREADY COLLECTED (do not re-extract these):\n{json.dumps(already_collected, indent=2)}\n\n"
+        f"RUNNING NARRATIVE:\n{narrative}\n\n"
+        f"INCIDENT TYPE SO FAR: {session['incident_type'] or 'Unknown'}\n\n"
+        f"Now read the full conversation below and extract any new field values.\n"
+    )
+
+    messages = [{"role": "system", "content": EXTRACTOR_PROMPT + state_context}]
+    for msg in session["chat_history"]:
+        role = "user" if msg["is_user"] else "assistant"
+        messages.append({"role": role, "content": msg["content"]})
+    return messages
+
+
+def parse_extractor_response(response: str) -> dict:
+    """Parse the extractor's JSON-only response."""
     response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+    response = re.sub(r"^```json\s*", "", response).strip()
+    response = re.sub(r"\s*```$", "", response).strip()
 
-    json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
-    if not json_match:
-        json_match = re.search(r"```json\s*(.*?)$", response, re.DOTALL)
-
-    data = {}
-    natural_text = response
-
-    if json_match:
-        raw_json = json_match.group(1).strip()
-        if not raw_json.endswith("}"):
-            raw_json = raw_json + "}" * (raw_json.count("{") - raw_json.count("}"))
-        try:
-            data = json.loads(raw_json)
-        except Exception as e:
-            print(f"[smart_intake] JSON parse error: {e}")
-        natural_text = response[:json_match.start()].strip()
-        natural_text = re.sub(r"```$", "", natural_text).strip()
-
-    return natural_text, data
+    try:
+        return json.loads(response)
+    except Exception:
+        match = re.search(r"\{.*\}", response, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except Exception as e:
+                print(f"[extractor] JSON parse error: {e}")
+    return {}
 
 
 async def process_message(
@@ -379,72 +387,109 @@ async def process_message(
             session["step"] = "collecting"
             session["_correction_hint"] = "The worker wants to make a correction to the report. Ask them what they would like to change."
 
-    # ── COLLECTING — LLM INVESTIGATOR ─────────────────────────────────────────
+    # ── COLLECTING — PARALLEL LLM CALLS ──────────────────────────────────────
     if user_message and session["step"] == "collecting":
         save_message(session, user_message, is_user=True)
 
     if session["step"] == "collecting":
         correction_hint = session.pop("_correction_hint", None)
-        messages = build_ollama_messages(session, correction_hint=correction_hint)
+        conv_messages = build_conversation_messages(session, correction_hint=correction_hint)
+        ext_messages = build_extractor_messages(session)
 
         try:
-            raw_response = await chat_with_ollama(messages)
-            print(f"[smart_intake] raw response: {raw_response}")
+            # Fire sequentially — Ollama cannot handle parallel calls to same model
+            conv_response = await chat_with_ollama(conv_messages)
+            ext_response = await chat_with_ollama(ext_messages)
 
-            natural_text, data = parse_llm_response(raw_response)
+            print(f"[conversation] {conv_response[:120]}...")
+            print(f"[extractor] raw: {ext_response[:300]}...")
 
-            if "extracted" in data:
-                merge_extracted(session, data["extracted"])
+            # Parse extractor result
+            ext_data = parse_extractor_response(ext_response)
 
-            if data.get("incident_type") and data["incident_type"] in INCIDENT_TYPES:
+            # Update incident_type from extractor
+            if ext_data.get("incident_type") and ext_data["incident_type"] in INCIDENT_TYPES:
                 if not session["incident_type"]:
-                    session["incident_type"] = data["incident_type"]
+                    session["incident_type"] = ext_data["incident_type"]
                     print(f"[smart_intake] incident_type set to: {session['incident_type']}")
                     flush_pending_sif_case(session)
 
-            if data.get("narrative"):
-                session["narrative"] = data["narrative"]
+            # Update narrative from extractor
+            if ext_data.get("narrative"):
+                session["narrative"] = ext_data["narrative"]
                 print(f"[smart_intake] narrative updated")
-            elif not session.get("narrative"):
-                summary_check = ["is this accurate", "let me summarize", "i have all the information", "i believe i have all"]
-                if any(p in natural_text.lower() for p in summary_check):
-                    session["narrative"] = natural_text
-                    print(f"[smart_intake] narrative set from summary text")
 
-            if not session["report"]["basic_info"].get("actions_taken") and data.get("narrative"):
-                action_keywords = ["stopped", "notified", "called", "evacuated", "cleared", "reported", "shut down", "isolated", "inspected", "flushed"]
-                narrative = data["narrative"]
-                if any(kw in narrative.lower() for kw in action_keywords):
-                    sentences = narrative.split(". ")
-                    action_sentences = [s for s in sentences if any(kw in s.lower() for kw in action_keywords)]
-                    if action_sentences:
-                        session["report"]["basic_info"]["actions_taken"] = ". ".join(action_sentences).strip()
-                        print(f"[smart_intake] extracted actions_taken from narrative")
+            # Merge extracted fields
+            if ext_data.get("extracted"):
+                merge_extracted(session, ext_data["extracted"])
 
+            # Strip any accidental JSON the conversation model might include
+            natural_text = conv_response.strip()
+            natural_text = re.sub(r"```json.*?```", "", natural_text, flags=re.DOTALL).strip()
+
+            # Detect conversation ready signal
+            conv_ready = "CONV_READY" in natural_text
+            natural_text = natural_text.replace("CONV_READY", "").strip()
+
+            # Check extractor completeness
             missing = get_missing_fields(session)
-            llm_ready = data.get("ready_to_confirm", False)
-            summary_phrases = [
-                "is this accurate", "finalize the report", "i can finalize",
-                "ready to submit", "does this look correct", "shall i finalize",
-                "i have all the information", "i believe i have all", "let me summarize"
-            ]
-            text_signals_ready = any(p in natural_text.lower() for p in summary_phrases)
+            ext_ready = session["incident_type"] and not missing
 
-            should_confirm = session["incident_type"] and (
-                llm_ready or text_signals_ready or not missing
-            )
-            if should_confirm:
-                if missing:
-                    print(f"[smart_intake] confirming with missing fields: {missing}")
+            print(f"[smart_intake] conv_ready={conv_ready} ext_ready={ext_ready} missing={missing}")
+
+            # ── FOUR RULES ────────────────────────────────────────────────────
+            # Rule 1: Both ready → confirm
+            if conv_ready and ext_ready:
+                print(f"[smart_intake] both ready → confirm")
                 session["step"] = "confirm"
-                final_report = get_report_with_incident_type(session)
                 save_message(session, natural_text, is_user=False)
                 return {
                     "response": natural_text,
-                    "extracted": final_report,
+                    "extracted": get_report_with_incident_type(session),
                     "show_widget": "confirm-buttons"
                 }
 
+            # Rule 2: Neither ready → keep going normally
+            if not conv_ready and not ext_ready:
+                print(f"[smart_intake] neither ready → continuing")
+                save_message(session, natural_text, is_user=False)
+                return {
+                    "response": natural_text,
+                    "extracted": get_report_with_incident_type(session),
+                    "show_widget": None,
+                    "options": None
+                }
+
+            # Rule 3: Extractor ready, conversation not ready
+            # Keep going — conversation may be picking up on something extractor missed
+            # Extractor will update on next turn without wiping existing fields
+            if ext_ready and not conv_ready:
+                print(f"[smart_intake] extractor ready but conversation still asking → keep going")
+                save_message(session, natural_text, is_user=False)
+                return {
+                    "response": natural_text,
+                    "extracted": get_report_with_incident_type(session),
+                    "show_widget": None,
+                    "options": None
+                }
+
+            # Rule 4: Conversation ready, extractor not ready
+            # Inject missing fields back into conversation so it asks about them
+            if conv_ready and not ext_ready:
+                print(f"[smart_intake] conversation ready but extractor missing {missing} → injecting")
+                session["_correction_hint"] = (
+                    f"The system detected these fields are still missing: {', '.join(missing)}. "
+                    f"Please ask the worker about these specifically before confirming."
+                )
+                save_message(session, natural_text, is_user=False)
+                return {
+                    "response": natural_text,
+                    "extracted": get_report_with_incident_type(session),
+                    "show_widget": None,
+                    "options": None
+                }
+
+            # Fallback
             save_message(session, natural_text, is_user=False)
             return {
                 "response": natural_text,

@@ -3,6 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { listReports } from '../api/reports'
 import { listUnfinished, discardUnfinished } from '../api/unfinished'
+import {
+  getPendingWitnessRequests,
+  getWitnessSubmissions,
+  getWitnessView,
+  submitWitnessAccount,
+} from '../api/reports'
 import client from '../api/client'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -64,6 +70,184 @@ function SectionTitle({ title }) {
   )
 }
 
+// ── Witness Modal ─────────────────────────────────────────────────────────────
+function WitnessModal({ reportId, onClose, onSubmitted }) {
+  const [view, setView] = useState(null)       // witness-view data
+  const [loading, setLoading] = useState(true)
+  const [account, setAccount] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState(null)
+  const [submitted, setSubmitted] = useState(false)
+
+  useEffect(() => {
+    const fetch = async () => {
+      setLoading(true)
+      try {
+        const data = await getWitnessView(reportId)
+        setView(data)
+        if (data.my_nomination_status === 'submitted') setSubmitted(true)
+      } catch (e) {
+        setError('Failed to load incident details.')
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetch()
+  }, [reportId])
+
+  const handleSubmit = async () => {
+    if (!account.trim()) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      await submitWitnessAccount(reportId, account.trim())
+      setSubmitted(true)
+      if (onSubmitted) onSubmitted(reportId)
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Failed to submit account.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-lg max-h-[85vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div>
+            <div className="text-white font-semibold text-sm">Witness Account</div>
+            <div className="text-gray-500 text-xs font-mono mt-0.5">Report #{reportId}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-white text-xs font-mono transition-colors"
+          >
+            ✕ Close
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-5 py-4 flex-1">
+          {loading ? (
+            <div className="flex items-center justify-center py-10">
+              <div className="flex gap-1">
+                <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          ) : error && !view ? (
+            <div className="text-red-400 text-xs font-mono">{error}</div>
+          ) : view ? (
+            <>
+              {/* Identification — person / location / date only */}
+              <div className="mb-4 p-3 bg-gray-800 border border-gray-700 rounded-lg">
+                <div className="text-gray-500 text-xs font-mono uppercase tracking-wider mb-2">Incident</div>
+                <div className="space-y-1">
+                  {view.identification?.person_involved && (
+                    <div className="flex gap-3 text-xs font-mono">
+                      <span className="text-gray-500 w-24 shrink-0">Person</span>
+                      <span className="text-gray-200">{view.identification.person_involved}</span>
+                    </div>
+                  )}
+                  {view.identification?.location && (
+                    <div className="flex gap-3 text-xs font-mono">
+                      <span className="text-gray-500 w-24 shrink-0">Location</span>
+                      <span className="text-gray-200">{view.identification.location}</span>
+                    </div>
+                  )}
+                  {view.identification?.datetime && (
+                    <div className="flex gap-3 text-xs font-mono">
+                      <span className="text-gray-500 w-24 shrink-0">Date / Time</span>
+                      <span className="text-gray-200">{view.identification.datetime}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Collected fields from reporter */}
+              <div className="mb-4">
+                <div className="text-gray-500 text-xs font-mono uppercase tracking-wider mb-2">
+                  Collected Information
+                </div>
+                <div className="space-y-1">
+                  {Object.entries(view.structured_fields || {}).map(([key, val]) =>
+                    val ? (
+                      <div key={key} className="flex gap-3 text-xs font-mono">
+                        <span className="text-gray-500 w-24 shrink-0 capitalize">{key.replace(/_/g, ' ')}</span>
+                        <span className="text-gray-200">{val}</span>
+                      </div>
+                    ) : null
+                  )}
+                </div>
+              </div>
+
+              {/* Account input or submitted view */}
+              {submitted ? (
+                <div>
+                  <div className="text-gray-500 text-xs font-mono uppercase tracking-wider mb-2">
+                    Your Account
+                  </div>
+                  <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3">
+                    <p className="text-gray-300 text-xs font-mono leading-relaxed whitespace-pre-wrap">
+                      {view.my_account || account}
+                    </p>
+                  </div>
+                  <div className="text-green-400 text-xs font-mono mt-2">
+                    ✓ Your account has been submitted
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="text-gray-500 text-xs font-mono uppercase tracking-wider mb-2">
+                    Your Account
+                  </div>
+                  <p className="text-gray-500 text-xs font-mono mb-2 leading-relaxed">
+                    Please describe what you saw in your own words.
+                  </p>
+                  <textarea
+                    value={account}
+                    onChange={e => setAccount(e.target.value)}
+                    placeholder="Describe what you witnessed..."
+                    rows={5}
+                    className="w-full bg-gray-800 border border-gray-700 text-white text-xs font-mono px-3 py-2 rounded focus:outline-none focus:border-orange-500 transition-colors resize-none"
+                  />
+                  {error && <div className="text-red-400 text-xs font-mono mt-1">{error}</div>}
+                </div>
+              )}
+            </>
+          ) : null}
+        </div>
+
+        {/* Footer — submit button, hidden once submitted */}
+        {!loading && view && !submitted && (
+          <div className="px-5 py-4 border-t border-gray-800 flex justify-end gap-3">
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-white text-xs font-mono px-4 py-2 rounded transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={submitting || !account.trim()}
+              className="bg-orange-500 hover:bg-orange-400 text-white text-xs font-mono px-4 py-2 rounded transition-colors disabled:opacity-50"
+            >
+              {submitting ? 'Submitting...' : 'Submit Account'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function DashboardPage() {
   const { user, logoutUser } = useAuth()
   const navigate = useNavigate()
@@ -78,6 +262,11 @@ export default function DashboardPage() {
 
   const [analytics, setAnalytics] = useState(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(true)
+
+  // Witness state
+  const [pendingWitness, setPendingWitness] = useState([])
+  const [witnessSubmissions, setWitnessSubmissions] = useState([])
+  const [witnessModalReportId, setWitnessModalReportId] = useState(null)
 
   // Filters
   const [filterType, setFilterType] = useState('')
@@ -99,8 +288,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchUnfinished()
+    fetchWitnessData()
     if (user?.role === 'admin') fetchAnalytics()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchReports = async () => {
     setLoading(true)
@@ -146,6 +336,19 @@ export default function DashboardPage() {
     }
   }
 
+  const fetchWitnessData = async () => {
+    try {
+      const [pendingRes, submissionsRes] = await Promise.all([
+        getPendingWitnessRequests(),
+        getWitnessSubmissions(),
+      ])
+      setPendingWitness(pendingRes.pending || [])
+      setWitnessSubmissions(submissionsRes.submissions || [])
+    } catch (e) {
+      // Non-critical — fail silently
+    }
+  }
+
   const handleDiscard = async (e, id) => {
     e.stopPropagation()
     try {
@@ -164,6 +367,12 @@ export default function DashboardPage() {
     navigate(url)
   }
 
+  // After witness submits their account — move from pending to submissions
+  const handleWitnessSubmitted = (reportId) => {
+    setPendingWitness(prev => prev.filter(w => w.report_id !== reportId))
+    fetchWitnessData()
+  }
+
   const flaggedCount = reports.filter(r => r.flagged).length
 
   const formatDate = (iso) => {
@@ -180,11 +389,11 @@ export default function DashboardPage() {
 
   const severityChartData = analytics
     ? Object.entries(analytics.severity_breakdown)
-        .sort((a, b) => {
-          const order = ['low', 'medium', 'high', 'critical', 'unknown']
-          return order.indexOf(a[0]) - order.indexOf(b[0])
-        })
-        .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => {
+        const order = ['low', 'medium', 'high', 'critical', 'unknown']
+        return order.indexOf(a[0]) - order.indexOf(b[0])
+      })
+      .map(([name, count]) => ({ name, count }))
     : []
 
   const trendChartData = analytics ? analytics.monthly_trend : []
@@ -192,7 +401,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-gray-950 flex">
 
-      {/* Sidebar */}
+      {/* Sidebar — UNCHANGED */}
       <div className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
         <div className="p-4 border-b border-gray-800">
           <div className="flex items-center gap-2">
@@ -235,7 +444,7 @@ export default function DashboardPage() {
         <div className="p-4 border-t border-gray-800">
           <div className="text-gray-500 text-xs font-mono mb-1">{user?.username}</div>
           <div className="text-gray-600 text-xs font-mono mb-3">{user?.job_title}</div>
-          <NotificationBell />
+          <NotificationBell onWitnessClick={(reportId) => setWitnessModalReportId(reportId)} />
           <ThemeToggle />
           <button
             onClick={logoutUser}
@@ -249,7 +458,7 @@ export default function DashboardPage() {
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
 
-        {/* Header */}
+        {/* Header — UNCHANGED */}
         <div className="border-b border-gray-800 px-8 py-5">
           <h1 className="text-white font-semibold text-lg">Reports Dashboard</h1>
           <p className="text-gray-500 text-xs font-mono mt-0.5">
@@ -259,10 +468,9 @@ export default function DashboardPage() {
 
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-8">
 
-          {/* ── Admin only: Overview + Analytics ── */}
+          {/* ── Admin only: Overview + Analytics — UNCHANGED ── */}
           {user?.role === 'admin' && (
             <>
-              {/* Summary stats */}
               <div>
                 <SectionTitle title="Overview" />
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -273,7 +481,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Analytics charts */}
               {!analyticsLoading && analytics && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="bg-gray-900 border border-gray-800 rounded-lg p-5">
@@ -328,7 +535,6 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Top locations */}
               {!analyticsLoading && analytics && analytics.top_locations.length > 0 && (
                 <div>
                   <SectionTitle title="Top Locations" />
@@ -353,7 +559,100 @@ export default function DashboardPage() {
             </>
           )}
 
-          {/* Unfinished reports */}
+          {/* ── Pending Witness Requests — visible to all roles ── */}
+          {pendingWitness.length > 0 && (
+            <div>
+              <SectionTitle title={`Pending Witness Requests — ${pendingWitness.length}`} />
+              <div className="space-y-2">
+                {pendingWitness.map((w, i) => (
+                  <div
+                    key={i}
+                    className="bg-gray-900 border border-yellow-900/50 rounded-lg px-5 py-3 flex items-center justify-between gap-4"
+                  >
+                    <div className="flex items-center gap-4 min-w-0">
+                      {w.incident_type && (
+                        <Badge
+                          label={w.incident_type}
+                          colorClass={TYPE_COLORS[w.incident_type] || 'text-gray-400 bg-gray-800 border-gray-700'}
+                        />
+                      )}
+                      <div className="flex gap-4 text-xs font-mono">
+                        {w.person_involved && (
+                          <span>
+                            <span className="text-gray-600">Person: </span>
+                            <span className="text-gray-400">{w.person_involved}</span>
+                          </span>
+                        )}
+                        {w.location && (
+                          <span>
+                            <span className="text-gray-600">Location: </span>
+                            <span className="text-gray-400">{w.location}</span>
+                          </span>
+                        )}
+                        {w.datetime && (
+                          <span>
+                            <span className="text-gray-600">Date: </span>
+                            <span className="text-gray-400">{w.datetime}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setWitnessModalReportId(w.report_id)}
+                      className="text-xs font-mono px-3 py-1.5 rounded border border-yellow-800 text-yellow-400 hover:bg-yellow-900/30 transition-colors shrink-0"
+                    >
+                      Submit Account
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Witness Submissions — visible to all roles ── */}
+          {witnessSubmissions.length > 0 && (
+            <div>
+              <SectionTitle title={`Witness Submissions — ${witnessSubmissions.length}`} />
+              <div className="space-y-2">
+                {witnessSubmissions.map((w, i) => (
+                  <div
+                    key={i}
+                    onClick={() => setWitnessModalReportId(w.report_id)}
+                    className="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-lg px-5 py-3 flex items-center justify-between gap-4 cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-4 min-w-0">
+                      {w.incident_type && (
+                        <Badge
+                          label={w.incident_type}
+                          colorClass={TYPE_COLORS[w.incident_type] || 'text-gray-400 bg-gray-800 border-gray-700'}
+                        />
+                      )}
+                      <Badge label="Submitted" colorClass="text-green-400 bg-green-900/30 border-green-800" />
+                      <div className="flex gap-4 text-xs font-mono">
+                        {w.person_involved && (
+                          <span>
+                            <span className="text-gray-600">Person: </span>
+                            <span className="text-gray-400">{w.person_involved}</span>
+                          </span>
+                        )}
+                        {w.location && (
+                          <span>
+                            <span className="text-gray-600">Location: </span>
+                            <span className="text-gray-400">{w.location}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-gray-700 text-xs font-mono shrink-0 group-hover:text-orange-400 transition-colors">
+                      View →
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Unfinished reports — UNCHANGED ── */}
           {!unfinishedLoading && unfinished.length > 0 && (
             <div>
               <SectionTitle title={`Unfinished Reports — ${unfinished.length} in progress`} />
@@ -412,12 +711,11 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Filters */}
+          {/* ── Filters + All Reports — UNCHANGED ── */}
           <div>
             <SectionTitle title="All Reports" />
             <div className="flex flex-wrap gap-3 items-center mb-4">
 
-              {/* Search input */}
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -470,7 +768,6 @@ export default function DashboardPage() {
               </span>
             </div>
 
-            {/* Report list */}
             {loading ? (
               <div className="flex items-center justify-center py-20">
                 <div className="flex gap-1">
@@ -549,6 +846,17 @@ export default function DashboardPage() {
                       <div className="text-right shrink-0">
                         <div className="text-gray-600 text-xs font-mono">{formatDate(report.created_at)}</div>
                         <div className="text-gray-700 text-xs font-mono mt-1">{report.creator_name}</div>
+                        {report.vision_thread_status && (
+                          <div
+                            className={`text-xs font-mono mt-1 ${report.vision_thread_status === 'resolved' ? 'text-green-500' :
+                                report.vision_thread_status === 'open' ? 'text-amber-500' :
+                                  'text-gray-600'
+                              }`}
+                            title={`Photo follow-up: ${report.vision_thread_status}`}
+                          >
+                            📷
+                          </div>
+                        )}
                         <div className="text-orange-500 text-xs font-mono mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           View →
                         </div>
@@ -559,7 +867,6 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Pagination */}
             {!loading && total > PAGE_SIZE && (
               <div className="flex items-center justify-between mt-4">
                 <span className="text-gray-600 text-xs font-mono">
@@ -587,6 +894,15 @@ export default function DashboardPage() {
 
         </div>
       </div>
+
+      {/* Witness modal — mounts when witnessModalReportId is set */}
+      {witnessModalReportId && (
+        <WitnessModal
+          reportId={witnessModalReportId}
+          onClose={() => setWitnessModalReportId(null)}
+          onSubmitted={handleWitnessSubmitted}
+        />
+      )}
     </div>
   )
 }
