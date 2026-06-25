@@ -248,17 +248,35 @@ export default function AdminPage() {
     }
   }
 
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
   return (
-    <div className="min-h-screen bg-gray-950 flex">
+    <div className="min-h-screen w-full bg-gray-950 flex overflow-hidden">
+
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
       {/* Sidebar */}
-      <div className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
+      <div className={`${sidebarOpen ? 'flex' : 'hidden'} md:flex w-64 bg-gray-900 border-r border-gray-800 flex-col fixed md:relative inset-y-0 left-0 z-40 md:z-auto`}>
         <div className="p-4 border-b border-gray-800">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-orange-500 rounded flex items-center justify-center">
-              <span className="text-white font-bold text-xs">S</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 bg-orange-500 rounded flex items-center justify-center">
+                <span className="text-white font-bold text-xs">S</span>
+              </div>
+              <span className="text-orange-500 font-mono text-xs tracking-widest uppercase">Safety</span>
             </div>
-            <span className="text-orange-500 font-mono text-xs tracking-widest uppercase">Safety</span>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="md:hidden text-gray-500 hover:text-white text-lg leading-none"
+            >
+              ✕
+            </button>
           </div>
         </div>
 
@@ -307,14 +325,22 @@ export default function AdminPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* Header */}
-        <div className="border-b border-gray-800 px-8 py-5">
-          <h1 className="text-white font-semibold text-lg">Admin Panel</h1>
-          <p className="text-gray-500 text-xs font-mono mt-0.5">
-            Manage historical incident data and system settings
-          </p>
+        <div className="border-b border-gray-800 px-4 md:px-8 py-5 flex items-center gap-3">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden text-gray-400 hover:text-white text-xl leading-none"
+          >
+            ☰
+          </button>
+          <div>
+            <h1 className="text-white font-semibold text-lg">Admin Panel</h1>
+            <p className="text-gray-500 text-xs font-mono mt-0.5">
+              Manage historical incident data and system settings
+            </p>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-8 py-6 space-y-8">
+        <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6 space-y-8">
 
           {/* Historical data stats */}
           <div>

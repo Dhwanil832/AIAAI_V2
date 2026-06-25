@@ -142,6 +142,7 @@ export default function ChatPage() {
 
   const isSmartMode = searchParams.get('mode') === 'smart'
 
+  const [sidebarOpen, setSidebarOpen]       = useState(false)
   const [messages, setMessages]             = useState([])
   const [sessionId, setSessionId]           = useState(null)
   const [input, setInput]                   = useState('')
@@ -441,15 +442,31 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 flex">
+    <div className="min-h-screen w-full bg-gray-950 flex overflow-hidden">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <div className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
+      <div className={`${sidebarOpen ? 'flex' : 'hidden'} md:flex w-64 bg-gray-900 border-r border-gray-800 flex-col fixed md:relative inset-y-0 left-0 z-40 md:z-auto`}>
         <div className="p-4 border-b border-gray-800">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-orange-500 rounded flex items-center justify-center">
-              <span className="text-white font-bold text-xs">S</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 bg-orange-500 rounded flex items-center justify-center">
+                <span className="text-white font-bold text-xs">S</span>
+              </div>
+              <span className="text-orange-500 font-mono text-xs tracking-widest uppercase">Safety</span>
             </div>
-            <span className="text-orange-500 font-mono text-xs tracking-widest uppercase">Safety</span>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="md:hidden text-gray-500 hover:text-white text-lg leading-none"
+            >
+              ✕
+            </button>
           </div>
         </div>
 
@@ -503,25 +520,33 @@ export default function ChatPage() {
       {/* Main chat area */}
       <div className="flex-1 flex flex-col">
         {/* Header */}
-        <div className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-white font-semibold">
-                {isSmartMode ? 'Smart Incident Investigation' : 'Incident Report'}
-              </h1>
-              {isSmartMode && (
-                <span className="text-xs font-mono bg-orange-500/20 text-orange-400 border border-orange-800 px-2 py-0.5 rounded">
-                  AI Investigator
-                </span>
-              )}
+        <div className="border-b border-gray-800 px-3 md:px-6 py-3 md:py-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden text-gray-400 hover:text-white text-xl leading-none shrink-0"
+            >
+              ☰
+            </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-white font-semibold text-sm md:text-base truncate">
+                  {isSmartMode ? 'Smart Investigation' : 'Incident Report'}
+                </h1>
+                {isSmartMode && (
+                  <span className="hidden sm:inline text-xs font-mono bg-orange-500/20 text-orange-400 border border-orange-800 px-2 py-0.5 rounded">
+                    AI Investigator
+                  </span>
+                )}
+              </div>
+              <p className="text-gray-500 text-xs font-mono truncate">
+                {sessionId ? `Session: ${sessionId.slice(0, 8)}...` : 'Starting...'}
+              </p>
             </div>
-            <p className="text-gray-500 text-xs font-mono">
-              {sessionId ? `Session: ${sessionId.slice(0, 8)}...` : 'Starting...'}
-            </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 shrink-0">
             {saveMsg && (
-              <span className={`text-xs font-mono ${saveMsg === 'Progress saved' ? 'text-green-400' : 'text-red-400'}`}>
+              <span className={`text-xs font-mono hidden sm:inline ${saveMsg === 'Progress saved' ? 'text-green-400' : 'text-red-400'}`}>
                 {saveMsg}
               </span>
             )}
@@ -529,9 +554,9 @@ export default function ChatPage() {
               <button
                 onClick={handleSaveProgress}
                 disabled={saving}
-                className="text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 text-xs font-mono px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+                className="text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 text-xs font-mono px-2 md:px-3 py-1.5 rounded transition-colors disabled:opacity-50"
               >
-                {saving ? 'Saving...' : 'Save Progress'}
+                {saving ? '...' : <span><span className="hidden sm:inline">Save </span>Progress</span>}
               </button>
             )}
             {done && (
@@ -562,14 +587,14 @@ export default function ChatPage() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto p-3 md:p-6 space-y-4">
           {messages.map((msg) => (
             <div
               key={msg.id}
               className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               {msg.sender === 'summary' ? (
-                <div className="max-w-xl w-full bg-gray-900 border border-orange-800/40 rounded-lg overflow-hidden">
+                <div className="max-w-[90%] md:max-w-xl w-full bg-gray-900 border border-orange-800/40 rounded-lg overflow-hidden">
                   <div className="bg-orange-500/10 border-b border-orange-800/40 px-4 py-2">
                     <span className="text-orange-400 text-xs font-mono uppercase tracking-wider">Incident Summary</span>
                   </div>
@@ -580,7 +605,7 @@ export default function ChatPage() {
                 </div>
               ) : (
                 <div
-                  className={`max-w-xl px-4 py-3 rounded-lg text-sm leading-relaxed ${
+                  className={`max-w-[90%] md:max-w-xl px-3 md:px-4 py-3 rounded-lg text-sm leading-relaxed ${
                     msg.sender === 'user'
                       ? 'bg-orange-500 text-white'
                       : msg.sender === 'error'
@@ -719,7 +744,7 @@ export default function ChatPage() {
 
         {/* Extracted data panel */}
         {extracted && (
-          <div className="border-t border-gray-800 px-6 py-3 bg-gray-900">
+          <div className="border-t border-gray-800 px-3 md:px-6 py-3 bg-gray-900">
             <div className="text-gray-500 text-xs font-mono mb-2 uppercase tracking-wider">Collected so far</div>
             <div className="flex flex-wrap gap-x-6 gap-y-1">
               {(() => {
@@ -752,7 +777,7 @@ export default function ChatPage() {
 
         {/* Input bar */}
         {!done && (
-          <div className="border-t border-gray-800 p-4 space-y-2">
+          <div className="border-t border-gray-800 p-2 md:p-4 space-y-2">
 
             {/* Image preview strip */}
             {pendingImage && (
@@ -772,7 +797,7 @@ export default function ChatPage() {
               </div>
             )}
 
-            <div className="flex gap-2">
+            <div className="flex gap-1 md:gap-2">
               {/* Hidden image file input */}
               <input
                 ref={imageFileRef}
@@ -788,7 +813,7 @@ export default function ChatPage() {
                 onClick={() => imageFileRef.current?.click()}
                 disabled={loading || done}
                 title="Attach a photo"
-                className="px-3 py-3 rounded transition-colors font-mono text-sm disabled:opacity-40 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white"
+                className="px-2 md:px-3 py-2.5 md:py-3 rounded transition-colors font-mono text-sm disabled:opacity-40 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white shrink-0"
               >
                 📷
               </button>
@@ -802,11 +827,11 @@ export default function ChatPage() {
                 disabled={loading || transcribing}
                 placeholder={
                   transcribing ? 'Transcribing...' :
-                  pendingImage ? 'Add a message or just send the photo...' :
+                  pendingImage ? 'Add message or send photo...' :
                   isSmartMode ? 'Describe what happened...' :
                   'Type your message...'
                 }
-                className="flex-1 bg-gray-900 border border-gray-800 text-white px-4 py-3 rounded focus:outline-none focus:border-orange-500 transition-colors font-mono text-sm disabled:opacity-50"
+                className="flex-1 min-w-0 bg-gray-900 border border-gray-800 text-white px-2 md:px-4 py-2.5 md:py-3 rounded focus:outline-none focus:border-orange-500 transition-colors font-mono text-sm disabled:opacity-50"
               />
 
               {/* Mic button */}
@@ -817,7 +842,7 @@ export default function ChatPage() {
                 onTouchEnd={handleMicStop}
                 disabled={loading || transcribing || done}
                 title={recording ? 'Release to transcribe' : 'Hold to speak'}
-                className={`px-4 py-3 rounded transition-colors font-mono text-sm disabled:opacity-40 select-none ${
+                className={`px-2.5 md:px-4 py-2.5 md:py-3 rounded transition-colors font-mono text-sm disabled:opacity-40 select-none shrink-0 ${
                   recording
                     ? 'bg-red-500 hover:bg-red-400 text-white animate-pulse'
                     : transcribing
@@ -832,7 +857,7 @@ export default function ChatPage() {
               <button
                 onClick={() => handleSend(input)}
                 disabled={loading || (!input.trim() && !pendingImage)}
-                className="bg-orange-500 hover:bg-orange-400 disabled:bg-gray-800 disabled:text-gray-600 text-white px-5 py-3 rounded transition-colors font-mono text-sm"
+                className="bg-orange-500 hover:bg-orange-400 disabled:bg-gray-800 disabled:text-gray-600 text-white px-3 md:px-5 py-2.5 md:py-3 rounded transition-colors font-mono text-sm shrink-0"
               >
                 Send
               </button>
