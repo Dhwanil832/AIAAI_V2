@@ -1,337 +1,212 @@
-# AI-AAI: AI-Assisted Accident Investigation & Reporting
+# AI-AAI V2: Agentic Accident Investigation & Reporting
+
+AI-AAI V2 is the current development version of an **on-premise, agentic workplace-safety reporting system** for steel manufacturing environments.
+
+The system is designed for settings where an incident report begins with incomplete information, multiple evidence sources may become available over time, and the application must decide what information is still needed before producing a structured record for review.
+
+This repository extends the earlier AI-Assisted Accident Investigation system presented at **AISTech 2025** into a modular agentic workflow with local LLM inference, semantic retrieval, witness integration, and targeted visual evidence requests.
+
+> **Scope:** AI-AAI V2 focuses on incident reporting, evidence collection, clarification, and review support.  
+> The separate `Root_Cause_Analysis` project investigates deeper causal explanation, competing hypotheses, and progressive evidence-driven RCA.
 
 ---
 
-## Overview
+## What the System Does
 
-AI-AAI is a fully on-premise, conversational AI system for workplace safety incident reporting in steel manufacturing environments. It replaces manual OSHA-style forms with a multi-agent LLM pipeline — no cloud, no external APIs, everything runs locally.
+A reporter can describe an incident conversationally instead of completing a static form. The system then:
 
-**Stack at a glance:** FastAPI · PostgreSQL 16 · React/Vite · Ollama · Qdrant · MinIO · faster-whisper
+1. extracts only explicitly stated incident fields;
+2. tracks which required information is still missing;
+3. asks context-aware follow-up questions;
+4. preserves the original conversational account alongside the structured report;
+5. retrieves similar historical incidents;
+6. requests additional evidence when it could materially improve the investigation;
+7. incorporates witness accounts;
+8. flags incomplete reports for review; and
+9. supports an administrative review and approval workflow.
 
----
-
-## Table of Contents
-
-1. [Install Required Software](#1-install-required-software)
-2. [Set Up External Services](#2-set-up-external-services)
-3. [Clone the Repository](#3-clone-the-Repository)
-4. [Set Up the Backend](#4-set-up-the-backend)
-5. [Set Up the Frontend](#5-set-up-the-frontend)
-6. [Starting Everything](#6-starting-everything)
-7. [First-Time App Setup](#7-first-time-app-setup)
-8. [Service Port Reference](#8-service-port-reference)
-9. [Troubleshooting](#9-troubleshooting)
+The system runs entirely on-premise with local model inference.
 
 ---
 
-## 1. Install Required Software
+## Agentic Workflow
 
-Install each of the following. Links are provided for the exact versions used in development.
+### Intake Agent
+Maintains the reporting session, tracks incident type and required fields, preserves dialogue state, and determines the next missing information to request.
 
-### Python (Anaconda)
+### Extraction Agent
+Converts natural-language responses into structured incident fields while explicitly avoiding unsupported inference. Question context is used to correctly interpret short answers.
 
-Anaconda is recommended for environment isolation.
+### Flagging Agent
+Checks report completeness and identifies reports that require additional review because multiple required fields remain unresolved.
 
-**Download:** https://www.anaconda.com/download
+### Similarity Agent
+Retrieves related historical incidents using semantic search through Qdrant, with a weighted field-based fallback when the vector index is unavailable.
 
-Install with default settings. After install, open **Anaconda Prompt** for all Python-related steps.
+### Witness Agent
+Synthesizes the primary reporter account with additional witness statements while preserving contradictions rather than silently resolving them.
+
+### Vision Reasoning Agent
+Determines whether photographic evidence would materially help the investigation and, when warranted, asks the reporter for specific visual evidence.
+
+### Corrective-Action Support
+Surfaces recurring corrective actions from similar historical incidents as suggestions for human review rather than autonomous safety decisions.
 
 ---
 
-### Node.js
+## System Architecture
 
-Required to run the React frontend.
-
-**Download:** https://nodejs.org/en/download (choose the LTS version)
-
-Verify install:
-```bash
-node -v
-npm -v
+```text
+Reporter / Admin
+       |
+       v
+React + Vite Frontend
+       |
+       v
+FastAPI Backend
+       |
+       +--> Intake / Extraction / Flagging
+       |
+       +--> Witness + Vision Reasoning
+       |
+       +--> Similarity Retrieval
+       |       |
+       |       +--> Qdrant
+       |       +--> Historical Incident Store
+       |
+       +--> PostgreSQL
+       +--> MinIO
+       +--> Ollama
+       +--> faster-whisper
 ```
 
----
+### Core Stack
 
-### PostgreSQL 16
+- **Local LLM inference:** Ollama
+- **Backend:** FastAPI
+- **Frontend:** React + Vite
+- **Relational storage:** PostgreSQL
+- **Semantic retrieval:** Qdrant
+- **Object storage:** MinIO
+- **Speech-to-text:** faster-whisper
 
-The main relational database.
-
-**Download:** https://www.enterprisedb.com/downloads/postgres-postgresql-downloads
-
-During installation:
-- Set a password for the `postgres` superuser — **write it down**, you'll need it
-- Keep the default port: **5432**
-- Install **pgAdmin 4** when offered (useful for inspecting the database)
-
-After install, open **pgAdmin 4** or **psql** and create the application database:
-
-```sql
-CREATE DATABASE safety_chatbot_db;
-```
+No external cloud LLM API is required for the core workflow.
 
 ---
 
-### Ollama
+## Research Motivation
 
-Runs the local LLM (qwen3.5:9b) entirely on your machine.
+Industrial incident reporting is rarely a clean data-entry problem.
 
-**Download:** https://ollama.com/download
+Reports may begin with:
 
-Install, then open a terminal and pull the required model:
+- incomplete descriptions;
+- short or ambiguous answers;
+- missing fields;
+- conflicting witness accounts;
+- visual evidence that has not yet been requested;
+- historical incidents that may provide useful context; and
+- uncertainty about what information is still necessary.
 
-```bash
-ollama pull qwen3.5:9b
-ollama pull nomic-embed-text
-```
+AI-AAI V2 explores how an agentic reporting system can **maintain context, recognize information gaps, request useful evidence, and preserve uncertainty** instead of simply converting free text into a completed form.
 
-> **Note:** `qwen3.5:9b` is ~6 GB. `nomic-embed-text` (~275 MB) is used for vector embeddings in Qdrant. Both downloads require an internet connection the first time.
+The broader question is:
 
-Verify Ollama is running:
-```bash
-ollama list
-```
-
----
-
-### Qdrant
-
-The vector search engine for semantic similarity search across historical incidents.
-
-**Download:** https://github.com/qdrant/qdrant/releases/latest
-
-1. Download the Windows binary: `qdrant-x86_64-pc-windows-msvc.zip`
-2. Extract it to `C:\qdrant\`
-3. You should have `C:\qdrant\qdrant.exe`
-
-Run it:
-```bash
-C:\qdrant\qdrant.exe
-```
-
-Qdrant will start on port **6333** (HTTP) and **6334** (gRPC). You can verify it's running by visiting http://localhost:6333/dashboard in your browser.
-
-> Warnings about the config file or filesystem type check on first launch are **harmless**.
+> **How should an AI system decide what information it still needs before it can produce a useful account of an incident?**
 
 ---
 
-### MinIO
+## Project Evolution
 
-On-premise S3-compatible object storage for uploaded files and photos.
+### AISTech 2025 System
+The initial AI-Assisted Accident Investigation work focused on conversational reporting, context retention, structured information capture, and dynamic action sequencing.
 
-**Download:** https://min.io/download#/windows
+### AI-AAI V2
+The current system extends that foundation with:
 
-1. Download the Windows binary (`minio.exe`)
-2. Move it to `C:\minio\minio.exe`
-3. Create a data directory: `C:\minio\data`
+- modular agent responsibilities;
+- local LLM inference;
+- semantic retrieval over historical incidents;
+- contextual field extraction;
+- witness-account synthesis;
+- targeted visual-evidence requests;
+- completeness-aware review support; and
+- a full on-premise application stack.
 
-Run it:
-```bash
-C:\minio\minio.exe server C:\minio\data --console-address :9001
-```
-
-MinIO starts on port **9000** (API) and **9001** (web console). Default credentials are:
-- **Access Key**: `minioadmin`
-- **Secret Key**: `minioadmin`
-
-Verify by visiting http://localhost:9001 in your browser.
-
-> The `.bloomcycle.bin` prefix access error on startup is **harmless**.
+This repository represents the **current system implementation**, not the exact code snapshot associated with the original AISTech 2025 paper.
 
 ---
 
-## 2. Set Up External Services
+## Repository Structure
 
-Once Ollama, Qdrant, and MinIO are installed, make sure they are running **before** starting the backend. The backend connects to all three at startup.
-
-Start each in a separate terminal window:
-
-**Terminal 1 — Ollama:**
-```bash
-ollama serve
-```
-> Ollama may already be running as a system tray app after installation. Check before running this.
-
-**Terminal 2 — Qdrant:**
-```bash
-C:\qdrant\qdrant.exe
-```
-
-**Terminal 3 — MinIO:**
-```bash
-C:\minio\minio.exe server C:\minio\data --console-address :9001
-```
-
-**PostgreSQL** runs as a Windows service and starts automatically after installation. No manual start needed.
-
----
-
-## 3. Clone the Repository
-
-```bash
-git clone https://github.com/your-org/safety-chatbot.git
-cd safety-chatbot
+```text
+AIAAI_V2/
+├── backend/
+│   ├── agents/
+│   │   ├── intake.py
+│   │   ├── extractor.py
+│   │   ├── flagging.py
+│   │   ├── similarity.py
+│   │   ├── witness.py
+│   │   ├── vision_reasoning.py
+│   │   └── corrective_actions.py
+│   ├── core/
+│   ├── models/
+│   ├── routers/
+│   ├── schemas/
+│   ├── migrations/
+│   └── scripts/
+│
+└── frontend/
+    ├── src/
+    │   ├── pages/
+    │   ├── components/
+    │   ├── api/
+    │   └── context/
+    └── public/
 ```
 
 ---
 
-## 4. Set Up the Backend
+## Running the System
 
-### Create the Conda Environment
+The application requires the following local services:
 
-Open **Anaconda Prompt** from the Start menu:
+- PostgreSQL
+- Ollama
+- Qdrant
+- MinIO
+- FastAPI backend
+- React/Vite frontend
 
-```bash
-conda create -n safety-chatbot python=3.11 -y
-conda activate safety-chatbot
+Detailed installation and service-start instructions can be placed in:
+
+```text
+docs/SETUP.md
 ```
 
-### Install Python Dependencies
-
-```bash
-cd path\to\safety-chatbot\backend
-pip install -r requirements.txt
-```
-
-If a `requirements.txt` is not present, install the core packages manually:
-
-```bash
-pip install fastapi uvicorn sqlalchemy alembic psycopg2-binary python-jose passlib bcrypt python-multipart pydantic-settings qdrant-client minio httpx pandas openpyxl faster-whisper
-```
-
-### Run Database Migrations
-
-With the conda environment active and PostgreSQL running:
-
-```bash
-cd backend
-alembic upgrade head
-```
-
-This creates all tables in `safety_chatbot_db`. You should see a series of migration steps complete without errors.
-
-> **If you see `relation already exists` errors**, your database may have leftover tables from a previous run. The safest fix is to drop and recreate the database in pgAdmin, then re-run `alembic upgrade head`.
-
-### Reset PostgreSQL Sequences (After Bulk Data Migration Only)
-
-If you've imported existing data from another database, sequences may be out of sync. Run these in psql or pgAdmin:
-
-```sql
-SELECT setval('incident_reports_id_seq', (SELECT MAX(id) FROM incident_reports));
-SELECT setval('unfinished_reports_id_seq', (SELECT MAX(id) FROM unfinished_reports));
-SELECT setval('users_id_seq', (SELECT MAX(id) FROM users));
-```
+This keeps the main README focused on the research system while preserving full reproducibility instructions separately.
 
 ---
 
-## 5. Set Up the Frontend
+## Safety and Human Oversight
 
-Open a new terminal (standard Command Prompt or PowerShell is fine):
+AI-AAI V2 is a research and decision-support system.
 
-```bash
-cd path\to\safety-chatbot\frontend
-npm install
-```
-
-This installs all React dependencies from `package.json`.
+It is **not** intended to autonomously determine blame, establish an official root cause, or issue plant operating instructions. Generated summaries, retrieved incidents, requested evidence, and corrective-action suggestions remain subject to human review.
 
 ---
 
-## 6. Starting Everything
+## Related Work
 
-You need **five things running** simultaneously. Use five separate terminal windows.
+- **Progressive Evidence-Driven Root Cause Analysis**  
+  Separate research project investigating competing causal explanations, active information seeking, evidence-grounded revision, and versioned RCA.
 
-| Terminal | Command | What It Does |
-|---|---|---|
-| 1 | `ollama serve` | LLM inference server |
-| 2 | `C:\qdrant\qdrant.exe` | Vector search engine |
-| 3 | `C:\minio\minio.exe server C:\minio\data --console-address :9001` | Object storage |
-| 4 | `cd backend && uvicorn main:app --reload --port 8000` | FastAPI backend |
-| 5 | `cd frontend && npm run dev` | React frontend (Vite) |
-
-> PostgreSQL runs as a background Windows service — no terminal needed.
-
-For Terminal 4 (backend), make sure your conda environment is active first:
-```bash
-conda activate safety-chatbot
-cd path\to\safety-chatbot\backend
-uvicorn main:app --reload --port 8000
-```
-
-Once everything is running, open your browser to:
-
-**http://localhost:5173**
+- **AI-Assisted Accident Investigation, AISTech 2025**  
+  Earlier version of the conversational incident-reporting system that motivated the current architecture.
 
 ---
 
-## 7. First-Time App Setup
+## Affiliation
 
-### Create the First Admin Account
-
-On first launch, navigate to http://localhost:5173 and you will see a setup screen to create the initial admin account. This route is only available when no users exist in the database.
-
-Alternatively, call the setup endpoint directly:
-```bash
-curl -X POST http://localhost:8000/auth/setup \
-  -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "yourpassword", "job_title": "Safety Manager"}'
-```
-
-### Upload Historical Incident Data (Optional)
-
-Log in as admin, navigate to the **Admin** page, and use the historical data upload section to import `.xls` / `.xlsx` files of past incidents. The system supports three incident types: Personal Injuries, Near Miss, and Equipment Damage.
-
-> Column headers in the XLS files should start at row 5 (0-indexed row 4). The system maps known column names automatically.
-
-### Backfill Qdrant Vector Embeddings (Optional)
-
-After uploading historical data, run the backfill script to embed all records into Qdrant for semantic similarity search:
-
-```bash
-conda activate safety-chatbot
-cd backend
-python scripts/backfill_qdrant.py
-```
-
-This uses `nomic-embed-text` (via Ollama) to embed each incident and store it in the `incident_reports` Qdrant collection.
-
----
-
-## 8. Service Port Reference
-
-| Service | Port | URL | Notes |
-|---|---|---|---|
-| PostgreSQL | 5432 | — | Windows service, auto-starts |
-| Ollama | 11434 | http://localhost:11434 | LLM inference |
-| Qdrant | 6333 | http://localhost:6333/dashboard | Vector search |
-| MinIO API | 9000 | — | S3-compatible API |
-| MinIO Console | 9001 | http://localhost:9001 | Web UI |
-| FastAPI | 8000 | http://localhost:8000/docs | Backend + Swagger UI |
-| React (Vite) | 5173 | http://localhost:5173 | Frontend app |
-
----
-
-## 9. Troubleshooting
-
-### `alembic upgrade head` fails with "column already exists"
-The database has a partial schema from a previous state. Drop all tables (or drop and recreate the database), then re-run the migration.
-
-### Backend starts but Ollama calls time out
-Make sure Ollama is running (`ollama serve`) and the model is downloaded (`ollama list`). The model name in `.env` must match exactly — e.g., `qwen3.5:9b`.
-
-### Qdrant connection refused
-Qdrant is not running. Start it with `C:\qdrant\qdrant.exe`. If the port is blocked, check Windows Firewall settings for port 6333.
-
-### MinIO errors on file upload
-Confirm MinIO is running and the `safety-chatbot` bucket exists. The bucket is created automatically on backend startup — if it's missing, the backend may not have started cleanly. Check the backend terminal for startup errors.
-
-### FastAPI returns 422 on report export or witness routes
-Route ordering issue. Specific routes like `/reports/export` and `/witness-pending` must be registered **before** parameterized routes like `/{report_id}` in `routers/reports.py`. Check that route order is correct.
-
-### PostgreSQL sequence errors after data import (`duplicate key value`)
-Run the `setval()` commands in [Section 5](#5-set-up-the-backend) to resync PostgreSQL sequences.
-
-### `NaN` values causing PostgreSQL JSON insert failures
-Historical XLS files with empty cells produce Python `float('nan')` values which PostgreSQL JSON columns reject. The sanitizer in the upload pipeline handles this automatically. If you see this error outside of historical upload, ensure `_sanitize_for_json()` is applied to all JSON fields before insert.
-
----
-
+Developed as part of research at the **Center for Innovation through Visualization and Simulation (CIVS), Purdue University Northwest**.
